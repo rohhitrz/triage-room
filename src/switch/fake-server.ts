@@ -134,6 +134,11 @@ export class FakeSwitch {
     if (ops && req.method === "POST" && ops[2]) {
       const body = await readBody(req);
       const connectionId = header(req, "x-switch-connection-id");
+      if (ops[2] === "list_rooms") {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ result: [{ id: "room_1", name: "refund-desk" }] }));
+        return;
+      }
       if (ops[2] === "update_agent_detail") {
         const agent = this.agents.get(ops[1]);
         if (agent) agent.addressing = String(body.addressing ?? "");
