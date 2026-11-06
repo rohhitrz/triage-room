@@ -117,7 +117,15 @@ export class SwitchClient {
       }, this.options.timeoutMs ?? 5000);
 
       socket.on("message", (raw) => {
-        const frame = JSON.parse(raw.toString()) as Record<string, unknown>;
+        let frame: Record<string, unknown>;
+        try {
+          const parsed = JSON.parse(raw.toString()) as unknown;
+          if (!parsed || typeof parsed !== "object") throw new Error("frame is not an object");
+          frame = parsed as Record<string, unknown>;
+        } catch (error) {
+          console.error(`ignored malformed Switch frame: ${error instanceof Error ? error.message : error}`);
+          return;
+        }
         const kind = frameKind(frame);
         if (kind === "ping") {
           socket.send(JSON.stringify({ type: "pong", cursor: this.options.getCursor() }));
@@ -131,9 +139,16 @@ export class SwitchClient {
           return;
         }
         if (kind === "gap") this.options.recovery?.hold();
-        void this.dispatch(frame).finally(() => {
-          if (kind === "gap") this.options.recovery?.release();
-        });
+        void this.dispatch(frame)
+          .catch((error) => {
+            console.error(`failed to handle Switch ${kind || "frame"}: ${error instanceof Error ? error.message : error}`);
+            // A gap we could not record must not be treated as handled. Reconnect from the
+            // saved cursor so the server reports it again.
+            if (kind === "gap") socket.close();
+          })
+          .finally(() => {
+            if (kind === "gap") this.options.recovery?.release();
+          });
       });
 
       socket.on("close", () => {

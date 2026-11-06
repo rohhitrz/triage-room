@@ -1,5 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
-import type { DomainMessage, GapFrame } from "../switch/protocol.ts";
+import { normalizeFrame, type DomainMessage, type GapFrame } from "../switch/protocol.ts";
 
 export type InboxRow = {
   id: number;
@@ -31,6 +31,7 @@ export function cursorEpoch(db: DatabaseSync): number {
 }
 
 export function enqueueMessage(db: DatabaseSync, frame: DomainMessage): "queued" | "resume" | "completed" {
+  frame = normalizeFrame(frame);
   const sequence = frame.id;
   const messageId = frame.data.payload.message_id;
   const epoch = cursorEpoch(db);

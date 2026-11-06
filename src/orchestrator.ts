@@ -2,17 +2,18 @@ import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { bindApproval, parseApproval, rejectionSentence, type Action } from "./approval/parse.ts";
 import { recordLlmCall, type DraftOutput } from "./draft/llm.ts";
-import { composeLedgerPost, executeApproval } from "./ledger/execute.ts";
+import { composeLedgerPost, executeApproval, refusalReason } from "./ledger/execute.ts";
 import {
   allClauses,
   assessOrder,
   buildDraftPrompt,
   composeDraftPost,
   splitCitations,
+  type Assessment,
   type Clause,
   type OrderRow,
 } from "./policy/ground.ts";
-import type { DomainMessage } from "./switch/protocol.ts";
+import { normalizeFrame, type DomainMessage } from "./switch/protocol.ts";
 import type { RecoveryGate } from "./switch/recovery.ts";
 
 export type DraftFn = (input: {
@@ -56,8 +57,9 @@ async function afterRecovery(options: OrchestratorOptions): Promise<void> {
   await options.recovery?.wait();
 }
 
-export async function handleDomainMessage(db: DatabaseSync, frame: DomainMessage, options: OrchestratorOptions): Promise<string | null> {
+export async function handleDomainMessage(db: DatabaseSync, incoming: DomainMessage, options: OrchestratorOptions): Promise<string | null> {
   await afterRecovery(options);
+  const frame = normalizeFrame(incoming);
   const payload = frame.data.payload;
   if (!payload.addressed) return null;
   db.prepare(
@@ -75,10 +77,10 @@ export async function handleDomainMessage(db: DatabaseSync, frame: DomainMessage
     now(),
   );
 
-  const savedDraft = db.prepare("SELECT rendered_reply FROM tickets WHERE source_message_id = ?").get(payload.message_id) as
-    | { rendered_reply: string | null }
+  const opened = db.prepare("SELECT id, rendered_reply FROM tickets WHERE source_message_id = ?").get(payload.message_id) as
+    | { id: string; rendered_reply: string | null }
     | undefined;
-  if (savedDraft?.rendered_reply) return savedDraft.rendered_reply;
+  if (opened) return opened.rendered_reply ?? composeLedgerPost(db, opened.id);
 
   const triggered = db
     .prepare(
@@ -92,15 +94,51 @@ export async function handleDomainMessage(db: DatabaseSync, frame: DomainMessage
   const savedApproval = db.prepare("SELECT id, ticket_id FROM approvals WHERE message_id = ?").get(payload.message_id) as
     | { id: string; ticket_id: string }
     | undefined;
-  if (savedApproval) {
-    const done = db.prepare("SELECT COUNT(*) AS n FROM actions WHERE approval_id = ?").get(savedApproval.id) as { n: number };
-    if (Number(done.n) === 0) executeApproval(db, savedApproval.id);
-    return composeLedgerPost(db, savedApproval.ticket_id);
-  }
+  if (savedApproval) return runApproval(db, savedApproval.id, savedApproval.ticket_id, payload);
 
   const ticket = findTicket(db, payload);
   if (ticket) return handleInThread(db, ticket, payload, options);
   return openTicket(db, frame, options);
+}
+
+function blocked(reason: string): string {
+  return `Blocked. Nothing was executed.\nReason: ${rejectionSentence(reason)}.`;
+}
+
+// Runs a stored approval once. A refusal is recorded and answered in the thread, so the
+// owner always hears back and a replay of the same message gives the same answer.
+function runApproval(db: DatabaseSync, approvalId: string, ticketId: string, payload: DomainMessage["data"]["payload"]): string {
+  const done = db.prepare("SELECT COUNT(*) AS n FROM actions WHERE approval_id = ?").get(approvalId) as { n: number };
+  if (Number(done.n) > 0) return composeLedgerPost(db, ticketId);
+  const refused = db
+    .prepare(
+      `SELECT json_extract(payload_json, '$.reason') AS reason FROM audit_events
+       WHERE kind = 'approval_rejected' AND ticket_id = ? AND json_extract(payload_json, '$.message_id') = ?
+       ORDER BY id DESC LIMIT 1`,
+    )
+    .get(ticketId, payload.message_id) as { reason: string } | undefined;
+  if (refused) return blocked(refused.reason);
+  try {
+    executeApproval(db, approvalId);
+  } catch (error) {
+    const reason = refusalReason(error);
+    if (!reason) throw error;
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      db.prepare("UPDATE approvals SET invalidated_at = ? WHERE id = ? AND invalidated_at IS NULL").run(now(), approvalId);
+      db.prepare("INSERT INTO audit_events (ticket_id, kind, payload_json, created_at) VALUES (?, 'approval_rejected', ?, ?)").run(
+        ticketId,
+        JSON.stringify({ reason, message_id: payload.message_id, verbatim: payload.body }),
+        now(),
+      );
+      db.exec("COMMIT");
+    } catch (inner) {
+      db.exec("ROLLBACK");
+      throw inner;
+    }
+    return blocked(reason);
+  }
+  return composeLedgerPost(db, ticketId);
 }
 
 function findTicket(db: DatabaseSync, payload: DomainMessage["data"]["payload"]): TicketRow | undefined {
@@ -156,7 +194,7 @@ async function handleInThread(
       JSON.stringify({ reason: bound.reason, message_id: payload.message_id, verbatim: payload.body }),
       now(),
     );
-    return `Blocked. Nothing was executed.\nReason: ${rejectionSentence(bound.reason)}.`;
+    return blocked(bound.reason);
   }
 
   const existing = db.prepare("SELECT id FROM approvals WHERE message_id = ?").get(payload.message_id) as { id: string } | undefined;
@@ -168,97 +206,132 @@ async function handleInThread(
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(approvalId, ticket.id, payload.message_id, payload.thread_id, payload.sender, ticket.proposal_version, payload.body, JSON.stringify(bound.actions), now());
   }
-  const already = db.prepare("SELECT COUNT(*) AS n FROM actions WHERE approval_id = ?").get(approvalId) as { n: number };
-  if (Number(already.n) === 0) {
-    await afterRecovery(options);
-    const fresh = db.prepare("SELECT needs_refresh, proposal_version FROM tickets WHERE id = ?").get(ticket.id) as {
-      needs_refresh: number;
-      proposal_version: number;
-    };
-    if (fresh.needs_refresh || fresh.proposal_version !== ticket.proposal_version) {
-      return "This proposal was cleared because room history could not be verified after a gap. Repost the ticket text in this thread, or start a new root message. Nothing was executed.";
-    }
-    executeApproval(db, approvalId);
+  await afterRecovery(options);
+  const fresh = db.prepare("SELECT needs_refresh, proposal_version FROM tickets WHERE id = ?").get(ticket.id) as {
+    needs_refresh: number;
+    proposal_version: number;
+  };
+  if (fresh.needs_refresh || fresh.proposal_version !== ticket.proposal_version) {
+    return "This proposal was cleared because room history could not be verified after a gap. Repost the ticket text in this thread, or start a new root message. Nothing was executed.";
   }
-  return composeLedgerPost(db, ticket.id);
+  return runApproval(db, approvalId, ticket.id, payload);
+}
+
+type Drafted = {
+  assessment: Assessment;
+  clauses: Clause[];
+  drafted: DraftOutput;
+  citations: { accepted: string[]; rejected: string[] };
+  prompt: string;
+  latencyMs: number;
+};
+
+// Asks the model for wording. Code has already decided eligibility. Returns null if the model failed.
+async function draftFor(
+  db: DatabaseSync,
+  order: OrderRow,
+  ticketText: string,
+  ticketId: string | null,
+  options: OrchestratorOptions,
+): Promise<Drafted | null> {
+  const stored = db.prepare("SELECT id, heading, body FROM policy_clauses ORDER BY id").all() as Clause[];
+  const clauses = stored.length === 3 ? stored : allClauses();
+  const assessment = assessOrder(order, options.today);
+  const prompt = buildDraftPrompt({ order, clauses, ticketText, assessment });
+  const started = Date.now();
+  let drafted: DraftOutput;
+  try {
+    drafted = await options.draft({ order, clauses, ticketText, assessment });
+  } catch (error) {
+    db.prepare("INSERT INTO audit_events (ticket_id, kind, payload_json, created_at) VALUES (?, 'model_failed', ?, ?)").run(
+      ticketId,
+      JSON.stringify({ message: error instanceof Error ? error.message : "model failed" }),
+      now(),
+    );
+    return null;
+  }
+  const latencyMs = Date.now() - started;
+  await afterRecovery(options);
+  const citations = splitCitations(drafted.cited_chunk_ids, clauses.map((clause) => clause.id));
+  return { assessment, clauses, drafted, citations, prompt: `${prompt.system}\n${prompt.user}`, latencyMs };
+}
+
+// Writes the draft, its citations, the pending proposals, and the model call. Caller holds the transaction.
+function storeDraft(
+  db: DatabaseSync,
+  input: Drafted & { ticketId: string; version: number; orderId: string; triggerMessageId: string | null; resent: boolean; options: OrchestratorOptions },
+): string {
+  const created = now();
+  const draftId = randomUUID();
+  db.prepare(
+    `INSERT INTO drafts (id, ticket_id, proposal_version, customer_reply, internal_note, created_at, trigger_message_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  ).run(draftId, input.ticketId, input.version, input.drafted.customer_reply, input.drafted.internal_note, created, input.triggerMessageId);
+  const cite = db.prepare("INSERT INTO draft_citations (draft_id, chunk_id, accepted) VALUES (?, ?, ?)");
+  for (const id of input.citations.accepted) cite.run(draftId, id, 1);
+  for (const id of input.citations.rejected) cite.run(draftId, id, 0);
+  const proposal = db.prepare(
+    "INSERT INTO proposals (id, ticket_id, proposal_version, action, status, order_id) VALUES (?, ?, ?, ?, 'pending', ?)",
+  );
+  for (const action of input.assessment.proposedActions) proposal.run(randomUUID(), input.ticketId, input.version, action, input.orderId);
+  if (input.citations.rejected.length > 0) {
+    db.prepare("INSERT INTO audit_events (ticket_id, kind, payload_json, created_at) VALUES (?, 'citation_rejected', ?, ?)").run(
+      input.ticketId,
+      JSON.stringify({ rejected: input.citations.rejected }),
+      created,
+    );
+  }
+  db.prepare("INSERT INTO audit_events (ticket_id, kind, payload_json, created_at) VALUES (?, 'draft_stored', ?, ?)").run(
+    input.ticketId,
+    JSON.stringify({ proposal_version: input.version, eligibility: input.assessment.eligibility, ...(input.resent ? { resent: true } : {}) }),
+    created,
+  );
+  recordLlmCall(db, {
+    ticketId: input.ticketId,
+    provider: input.options.provider,
+    model: input.options.model,
+    prompt: input.prompt,
+    response: input.drafted,
+    latencyMs: input.latencyMs,
+  });
+  return composeDraftPost({
+    assessment: input.assessment,
+    customerReply: input.drafted.customer_reply,
+    clauses: input.clauses,
+    acceptedCitationIds: input.citations.accepted,
+    version: input.version,
+  });
 }
 
 async function openTicket(db: DatabaseSync, frame: DomainMessage, options: OrchestratorOptions): Promise<string> {
   const payload = frame.data.payload;
-  const existing = db.prepare("SELECT id FROM tickets WHERE source_message_id = ?").get(payload.message_id) as { id: string } | undefined;
-  if (existing) return composeDraftPost(rebuildPost(db, existing.id));
-
   const orderId = orderIdFrom(payload.body);
   if (!orderId) return "I need an order id, for example Order #4821. Nothing was executed.";
   const order = db.prepare("SELECT * FROM orders WHERE id = ?").get(orderId) as OrderRow | undefined;
   if (!order) return `I don't have order #${orderId} in the ledger. Nothing was executed.`;
-  const clauses = db.prepare("SELECT id, heading, body FROM policy_clauses ORDER BY id").all() as Clause[];
-  const known = clauses.length === 3 ? clauses : allClauses();
-  const assessment = assessOrder(order, options.today);
-  const prompt = buildDraftPrompt({ order, clauses: known, ticketText: payload.body, assessment });
-  let drafted: DraftOutput;
-  const started = Date.now();
-  try {
-    drafted = await options.draft({ order, clauses: known, ticketText: payload.body, assessment });
-  } catch (error) {
-    db.prepare("INSERT INTO audit_events (ticket_id, kind, payload_json, created_at) VALUES (NULL, 'model_failed', ?, ?)").run(
-      JSON.stringify({ message: error instanceof Error ? error.message : "model failed" }),
-      now(),
-    );
-    return "I couldn't draft that. Nothing was executed.";
-  }
-  await afterRecovery(options);
+  const result = await draftFor(db, order, payload.body, null, options);
+  if (!result) return "I couldn't draft that. Nothing was executed.";
 
-  const citations = splitCitations(drafted.cited_chunk_ids, known.map((clause) => clause.id));
-  const threadId = payload.thread_id ?? payload.message_id;
+  const threadId = payload.thread_id || payload.message_id;
   const ticketId = randomUUID();
-  const draftId = randomUUID();
-  const created = now();
   db.exec("BEGIN");
   try {
     db.prepare(
       `INSERT INTO tickets (
         id, room_id, thread_id, source_message_id, order_id, label, eligibility, status, summary, proposal_version, created_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, 'awaiting_approval', ?, 1, ?)`,
-    ).run(ticketId, frame.data.room_id, threadId, payload.message_id, order.id, assessment.label, assessment.eligibility, assessment.summary, created);
-    db.prepare(
-      `INSERT INTO drafts (id, ticket_id, proposal_version, customer_reply, internal_note, created_at)
-       VALUES (?, ?, 1, ?, ?, ?)`,
-    ).run(draftId, ticketId, drafted.customer_reply, drafted.internal_note, created);
-    const cite = db.prepare("INSERT INTO draft_citations (draft_id, chunk_id, accepted) VALUES (?, ?, ?)");
-    for (const id of citations.accepted) cite.run(draftId, id, 1);
-    for (const id of citations.rejected) cite.run(draftId, id, 0);
-    const proposal = db.prepare(
-      "INSERT INTO proposals (id, ticket_id, proposal_version, action, status, order_id) VALUES (?, ?, 1, ?, 'pending', ?)",
-    );
-    for (const action of assessment.proposedActions) proposal.run(randomUUID(), ticketId, action, order.id);
-    if (citations.rejected.length > 0) {
-      db.prepare("INSERT INTO audit_events (ticket_id, kind, payload_json, created_at) VALUES (?, 'citation_rejected', ?, ?)").run(
-        ticketId,
-        JSON.stringify({ rejected: citations.rejected }),
-        created,
-      );
-    }
-    db.prepare("INSERT INTO audit_events (ticket_id, kind, payload_json, created_at) VALUES (?, 'draft_stored', ?, ?)").run(
+    ).run(
       ticketId,
-      JSON.stringify({ proposal_version: 1, eligibility: assessment.eligibility }),
-      created,
+      frame.data.room_id,
+      threadId,
+      payload.message_id,
+      order.id,
+      result.assessment.label,
+      result.assessment.eligibility,
+      result.assessment.summary,
+      now(),
     );
-    recordLlmCall(db, {
-      ticketId,
-      provider: options.provider,
-      model: options.model,
-      prompt: `${prompt.system}\n${prompt.user}`,
-      response: drafted,
-      latencyMs: Date.now() - started,
-    });
-    const rendered = composeDraftPost({
-      assessment,
-      customerReply: drafted.customer_reply,
-      clauses: known,
-      acceptedCitationIds: citations.accepted,
-      version: 1,
-    });
+    const rendered = storeDraft(db, { ...result, ticketId, version: 1, orderId: order.id, triggerMessageId: null, resent: false, options });
     db.prepare("UPDATE tickets SET rendered_reply = ? WHERE id = ?").run(rendered, ticketId);
     db.prepare("UPDATE room_messages SET ticket_id = ? WHERE message_id = ?").run(ticketId, payload.message_id);
     db.exec("COMMIT");
@@ -278,104 +351,38 @@ async function redraftTicket(
 ): Promise<string> {
   const order = db.prepare("SELECT * FROM orders WHERE id = ?").get(orderId) as OrderRow | undefined;
   if (!order) return `I don't have order #${orderId} in the ledger. Nothing was executed.`;
-  const clauses = db.prepare("SELECT id, heading, body FROM policy_clauses ORDER BY id").all() as Clause[];
-  const known = clauses.length === 3 ? clauses : allClauses();
-  const assessment = assessOrder(order, options.today);
-  let drafted: DraftOutput;
-  try {
-    drafted = await options.draft({ order, clauses: known, ticketText: payload.body, assessment });
-  } catch (error) {
-    db.prepare("INSERT INTO audit_events (ticket_id, kind, payload_json, created_at) VALUES (?, 'model_failed', ?, ?)").run(
-      ticket.id,
-      JSON.stringify({ message: error instanceof Error ? error.message : "model failed" }),
-      now(),
-    );
-    return "I couldn't draft that. Nothing was executed.";
-  }
-  await afterRecovery(options);
-  const citations = splitCitations(drafted.cited_chunk_ids, known.map((clause) => clause.id));
-  const rendered = composeDraftPost({
-    assessment,
-    customerReply: drafted.customer_reply,
-    clauses: known,
-    acceptedCitationIds: citations.accepted,
-    version: ticket.proposal_version,
-  });
-  const created = now();
+  const result = await draftFor(db, order, payload.body, ticket.id, options);
+  if (!result) return "I couldn't draft that. Nothing was executed.";
   db.exec("BEGIN");
   try {
-    const updated = db
-      .prepare(
-        `UPDATE tickets
-         SET needs_refresh = 0, summary = ?, label = ?, eligibility = ?, rendered_reply = ?, status = 'awaiting_approval'
-         WHERE id = ? AND needs_refresh = 1`,
-      )
-      .run(assessment.summary, assessment.label, assessment.eligibility, rendered, ticket.id) as { changes: number };
-    if (Number(updated.changes) !== 1) {
+    const claimed = db
+      .prepare("UPDATE tickets SET needs_refresh = 0, status = 'awaiting_approval' WHERE id = ? AND needs_refresh = 1")
+      .run(ticket.id) as { changes: number };
+    if (Number(claimed.changes) !== 1) {
       db.exec("ROLLBACK");
       const current = db.prepare("SELECT rendered_reply FROM tickets WHERE id = ?").get(ticket.id) as { rendered_reply: string | null };
-      return current.rendered_reply ?? rendered;
+      return current.rendered_reply ?? composeLedgerPost(db, ticket.id);
     }
-    const draftId = randomUUID();
-    db.prepare(
-      `INSERT INTO drafts (id, ticket_id, proposal_version, customer_reply, internal_note, created_at, trigger_message_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    ).run(draftId, ticket.id, ticket.proposal_version, drafted.customer_reply, drafted.internal_note, created, payload.message_id);
-    const cite = db.prepare("INSERT INTO draft_citations (draft_id, chunk_id, accepted) VALUES (?, ?, ?)");
-    for (const id of citations.accepted) cite.run(draftId, id, 1);
-    for (const id of citations.rejected) cite.run(draftId, id, 0);
-    const proposal = db.prepare(
-      "INSERT INTO proposals (id, ticket_id, proposal_version, action, status, order_id) VALUES (?, ?, ?, ?, 'pending', ?)",
-    );
-    for (const action of assessment.proposedActions) proposal.run(randomUUID(), ticket.id, ticket.proposal_version, action, order.id);
-    db.prepare("INSERT INTO audit_events (ticket_id, kind, payload_json, created_at) VALUES (?, 'draft_stored', ?, ?)").run(
-      ticket.id,
-      JSON.stringify({ proposal_version: ticket.proposal_version, eligibility: assessment.eligibility, resent: true }),
-      created,
-    );
-    recordLlmCall(db, {
+    const rendered = storeDraft(db, {
+      ...result,
       ticketId: ticket.id,
-      provider: options.provider,
-      model: options.model,
-      prompt: payload.body,
-      response: drafted,
-      latencyMs: 0,
+      version: ticket.proposal_version,
+      orderId: order.id,
+      triggerMessageId: payload.message_id,
+      resent: true,
+      options,
     });
+    db.prepare("UPDATE tickets SET summary = ?, label = ?, eligibility = ?, rendered_reply = ? WHERE id = ?").run(
+      result.assessment.summary,
+      result.assessment.label,
+      result.assessment.eligibility,
+      rendered,
+      ticket.id,
+    );
     db.exec("COMMIT");
     return rendered;
   } catch (error) {
     db.exec("ROLLBACK");
     throw error;
   }
-}
-
-function rebuildPost(db: DatabaseSync, ticketId: string) {
-  const ticket = db.prepare("SELECT * FROM tickets WHERE id = ?").get(ticketId) as {
-    summary: string;
-    label: "refund" | "question";
-    eligibility: "eligible" | "ineligible";
-    proposal_version: number;
-  };
-  const draft = db.prepare("SELECT customer_reply FROM drafts WHERE ticket_id = ? ORDER BY proposal_version DESC LIMIT 1").get(ticketId) as {
-    customer_reply: string;
-  };
-  const actions = (
-    db.prepare("SELECT action FROM proposals WHERE ticket_id = ? AND proposal_version = ? ORDER BY action").all(ticketId, ticket.proposal_version) as Array<{
-      action: Action;
-    }>
-  ).map((row) => row.action);
-  const clauses = db.prepare("SELECT id, heading, body FROM policy_clauses").all() as Clause[];
-  return {
-    assessment: {
-      label: ticket.label,
-      eligibility: ticket.eligibility,
-      proposedActions: actions,
-      usedClauseIds: [] as string[],
-      summary: ticket.summary,
-    },
-    customerReply: draft.customer_reply,
-    clauses,
-    acceptedCitationIds: [] as string[],
-    version: ticket.proposal_version,
-  };
 }

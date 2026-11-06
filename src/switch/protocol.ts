@@ -70,5 +70,15 @@ export function messageSequence(frame: DomainMessage): number {
 }
 
 export function isDomainMessage(frame: Record<string, unknown>): frame is DomainMessage {
-  return frame.event === "message" && typeof frame.id === "number" && frame.data != null;
+  if (frame.event !== "message" || typeof frame.id !== "number") return false;
+  const data = frame.data as { payload?: { message_id?: unknown; sender?: unknown; body?: unknown } } | null | undefined;
+  const payload = data?.payload;
+  return payload != null && typeof payload.message_id === "string" && typeof payload.sender === "string" && typeof payload.body === "string";
+}
+
+// Switch may send "" for a root message. Treat it as no thread, everywhere.
+export function normalizeFrame(frame: DomainMessage): DomainMessage {
+  const payload = frame.data.payload;
+  if (payload.thread_id || payload.thread_id === null) return frame;
+  return { ...frame, data: { ...frame.data, payload: { ...payload, thread_id: null } } };
 }

@@ -35,7 +35,7 @@ export async function deliverQueued(
       markCompleted(db, row.id);
       return "skipped";
     }
-    const threadId = frame.data.payload.thread_id ?? threadFor(db, messageId) ?? messageId;
+    const threadId = frame.data.payload.thread_id || threadFor(db, messageId) || messageId;
     const id = randomUUID();
     db.prepare(
       `INSERT INTO outbox (id, inbox_id, source_message_id, thread_id, body, state, attempts, created_at)

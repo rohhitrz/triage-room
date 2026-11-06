@@ -31,6 +31,21 @@ function now(): string {
   return new Date().toISOString();
 }
 
+// Reasons executeApproval refuses an approval for. These are answers for the owner, not faults to retry.
+export const REFUSAL_REASONS = new Set([
+  "missing_approval",
+  "missing_ticket",
+  "stale_approval",
+  "wrong_thread",
+  "not_proposed",
+  "order_mismatch",
+  "refund_already_recorded",
+]);
+
+export function refusalReason(error: unknown): string | null {
+  return error instanceof Error && REFUSAL_REASONS.has(error.message) ? error.message : null;
+}
+
 export function executeApproval(db: DatabaseSync, approvalId: string, options?: { fault?: "after_insert" }): void {
   db.exec("BEGIN IMMEDIATE");
   try {
@@ -48,14 +63,16 @@ export function executeApproval(db: DatabaseSync, approvalId: string, options?: 
       )
       .all(ticket.id, ticket.proposal_version) as ProposalRow[];
     const pending = new Map(proposals.filter((row) => row.status === "pending").map((row) => [row.action, row]));
-    for (const name of names) {
-      if (!pending.has(name)) throw new Error("not_proposed");
-    }
-    for (const name of names) {
+    // Check every named action before writing anything, so a refusal leaves no partial state.
+    const chosen = names.map((name) => {
       const proposal = pending.get(name);
       if (!proposal) throw new Error("not_proposed");
-      if (proposal.order_id != null && proposal.order_id !== ticket.order_id) throw new Error("order_mismatch");
-      if (name === "issue_refund" && proposal.order_id !== ticket.order_id) throw new Error("order_mismatch");
+      const boundElsewhere = proposal.order_id != null && proposal.order_id !== ticket.order_id;
+      const refundUnbound = name === "issue_refund" && (!ticket.order_id || proposal.order_id !== ticket.order_id);
+      if (boundElsewhere || refundUnbound) throw new Error("order_mismatch");
+      return { name, proposal };
+    });
+    for (const { name, proposal } of chosen) {
       db.prepare(
         `INSERT INTO actions (id, ticket_id, proposal_id, approval_id, action, outcome, reason, simulated, created_at)
          VALUES (?, ?, ?, ?, ?, 'executed', ?, 1, ?)`,
@@ -65,7 +82,6 @@ export function executeApproval(db: DatabaseSync, approvalId: string, options?: 
         db.prepare("UPDATE tickets SET finance_note = ? WHERE id = ?").run(SIMULATED_REASON.flag_finance, ticket.id);
       }
       if (name === "issue_refund") {
-        if (!ticket.order_id) throw new Error("refund_already_recorded");
         const updated = db.prepare("UPDATE orders SET status = 'refund_recorded' WHERE id = ? AND status = 'paid'").run(ticket.order_id) as {
           changes: number;
         };
@@ -79,23 +95,13 @@ export function executeApproval(db: DatabaseSync, approvalId: string, options?: 
       );
       if (options?.fault === "after_insert") throw new Error("fault");
     }
-    const stillPending = (
-      db
-        .prepare(
-          `SELECT COUNT(*) AS n FROM proposals
-           WHERE ticket_id = ? AND proposal_version = ? AND status = 'pending'`,
-        )
-        .get(ticket.id, ticket.proposal_version) as { n: number }
-    ).n;
-    const executed = (
-      db
-        .prepare(
-          `SELECT COUNT(*) AS n FROM proposals
-           WHERE ticket_id = ? AND proposal_version = ? AND status = 'executed'`,
-        )
-        .get(ticket.id, ticket.proposal_version) as { n: number }
-    ).n;
-    const status = stillPending === 0 ? "closed" : executed > 0 ? "partially_executed" : "awaiting_approval";
+    const counts = db
+      .prepare(
+        `SELECT COALESCE(SUM(status = 'pending'), 0) AS pending, COALESCE(SUM(status = 'executed'), 0) AS executed
+         FROM proposals WHERE ticket_id = ? AND proposal_version = ?`,
+      )
+      .get(ticket.id, ticket.proposal_version) as { pending: number; executed: number };
+    const status = Number(counts.pending) === 0 ? "closed" : Number(counts.executed) > 0 ? "partially_executed" : "awaiting_approval";
     db.prepare("UPDATE tickets SET status = ? WHERE id = ?").run(status, ticket.id);
     db.exec("COMMIT");
   } catch (error) {

@@ -1,5 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
+import type { GapFrame } from "../switch/protocol.ts";
 import { invalidateOlderApprovals } from "./execute.ts";
+import { enqueueGap } from "./inbox.ts";
 
 export type ContextMessage = {
   message_id: string;
@@ -15,7 +17,8 @@ function now(): string {
 export function reconcileAfterGap(db: DatabaseSync, messages: ContextMessage[]): string[] {
   const seen = new Set(messages.map((message) => message.message_id).filter(Boolean));
   const tickets = db
-    .prepare("SELECT id, source_message_id, proposal_version FROM tickets WHERE needs_refresh = 0")
+    // A closed ticket has nothing left to approve, so a gap cannot put it at risk. Leave it as it was.
+    .prepare("SELECT id, source_message_id, proposal_version FROM tickets WHERE needs_refresh = 0 AND status <> 'closed'")
     .all() as Array<{ id: string; source_message_id: string; proposal_version: number }>;
   const refreshed: string[] = [];
   for (const ticket of tickets) {
@@ -44,4 +47,27 @@ export function reconcileAfterGap(db: DatabaseSync, messages: ContextMessage[]):
     refreshed.push(ticket.id);
   }
   return refreshed;
+}
+
+// Records the gap and clears unverified proposals in one transaction. If the process dies
+// part way, neither happens, so it can never resume past the gap with stale approvals live.
+// A gap without resumed_at still clears proposals but leaves the cursor where it was.
+export function recordGap(db: DatabaseSync, frame: GapFrame, messages: ContextMessage[]): string[] {
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    if (typeof frame.resumed_at === "number") {
+      enqueueGap(db, frame);
+    } else {
+      db.prepare("INSERT INTO audit_events (ticket_id, kind, payload_json, created_at) VALUES (NULL, 'gap_without_cursor', ?, ?)").run(
+        JSON.stringify(frame),
+        now(),
+      );
+    }
+    const refreshed = reconcileAfterGap(db, messages);
+    db.exec("COMMIT");
+    return refreshed;
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
 }

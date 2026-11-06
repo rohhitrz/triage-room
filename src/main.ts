@@ -7,8 +7,8 @@ import { openDatabase } from "./db/open.ts";
 import { seed, DEMO_TODAY } from "./db/seed.ts";
 import { startLedger } from "./http/ledger.ts";
 import { deliverQueued } from "./ledger/deliver.ts";
-import { reconcileAfterGap } from "./ledger/gap.ts";
-import { claimNext, enqueueGap, enqueueMessage, reclaimProcessing, resumeSequence, scheduleDeliveryRetry } from "./ledger/inbox.ts";
+import { recordGap } from "./ledger/gap.ts";
+import { claimNext, enqueueMessage, reclaimProcessing, resumeSequence, scheduleDeliveryRetry } from "./ledger/inbox.ts";
 import { SwitchClient } from "./switch/client.ts";
 import { RecoveryGate } from "./switch/recovery.ts";
 
@@ -51,8 +51,7 @@ const client = new SwitchClient({
     enqueueMessage(db, frame);
   },
   onGap: async (frame, messages) => {
-    enqueueGap(db, frame);
-    reconcileAfterGap(db, messages);
+    recordGap(db, frame, messages);
   },
 });
 

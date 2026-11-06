@@ -82,6 +82,10 @@ export function rejectionSentence(reason: string): string {
     wrong_thread: "approval is not in this ticket's thread",
     stale_approval: "approval is for an older draft",
     not_proposed: "approval names an action that is not pending",
+    order_mismatch: "approval is not bound to this ticket's order",
+    refund_already_recorded: "this order already has a refund recorded",
+    missing_approval: "approval record is missing",
+    missing_ticket: "ticket record is missing",
   };
   return sentences[reason] ?? reason;
 }
