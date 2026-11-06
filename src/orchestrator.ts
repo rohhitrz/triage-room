@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
-import { bindApproval, rejectionSentence, type Action } from "./approval/parse.ts";
+import { bindApproval, parseApproval, rejectionSentence, type Action } from "./approval/parse.ts";
 import { recordLlmCall, type DraftOutput } from "./draft/llm.ts";
 import { composeLedgerPost, executeApproval } from "./ledger/execute.ts";
 import {
@@ -80,6 +80,15 @@ export async function handleDomainMessage(db: DatabaseSync, frame: DomainMessage
     | undefined;
   if (savedDraft?.rendered_reply) return savedDraft.rendered_reply;
 
+  const triggered = db
+    .prepare(
+      `SELECT tickets.rendered_reply AS rendered_reply
+       FROM drafts JOIN tickets ON tickets.id = drafts.ticket_id
+       WHERE drafts.trigger_message_id = ?`,
+    )
+    .get(payload.message_id) as { rendered_reply: string | null } | undefined;
+  if (triggered?.rendered_reply) return triggered.rendered_reply;
+
   const savedApproval = db.prepare("SELECT id, ticket_id FROM approvals WHERE message_id = ?").get(payload.message_id) as
     | { id: string; ticket_id: string }
     | undefined;
@@ -112,7 +121,13 @@ async function handleInThread(
   options: OrchestratorOptions,
 ): Promise<string> {
   if (ticket.needs_refresh) {
-    return "This proposal was cleared because room history could not be verified after a gap. Send the ticket again.";
+    const parsed = parseApproval(payload.body);
+    const orderId = orderIdFrom(payload.body);
+    const ownerOk = !options.ownerId || payload.sender === options.ownerId;
+    if (orderId && !parsed.ok && parsed.reason === "not_approval" && ownerOk) {
+      return redraftTicket(db, ticket, payload, options, orderId);
+    }
+    return "This proposal was cleared because room history could not be verified after a gap. Repost the ticket text in this thread, for example: Order #4821 charged twice. A new root message also starts a fresh proposal. Nothing was drafted from the missing history, and nothing was executed.";
   }
   const pending = (
     db
@@ -242,6 +257,86 @@ async function openTicket(db: DatabaseSync, frame: DomainMessage, options: Orche
     });
     db.prepare("UPDATE tickets SET rendered_reply = ? WHERE id = ?").run(rendered, ticketId);
     db.prepare("UPDATE room_messages SET ticket_id = ? WHERE message_id = ?").run(ticketId, payload.message_id);
+    db.exec("COMMIT");
+    return rendered;
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+async function redraftTicket(
+  db: DatabaseSync,
+  ticket: TicketRow,
+  payload: DomainMessage["data"]["payload"],
+  options: OrchestratorOptions,
+  orderId: string,
+): Promise<string> {
+  const order = db.prepare("SELECT * FROM orders WHERE id = ?").get(orderId) as OrderRow | undefined;
+  if (!order) return `I don't have order #${orderId} in the ledger. Nothing was executed.`;
+  const clauses = db.prepare("SELECT id, heading, body FROM policy_clauses ORDER BY id").all() as Clause[];
+  const known = clauses.length === 3 ? clauses : allClauses();
+  const assessment = assessOrder(order, options.today);
+  let drafted: DraftOutput;
+  try {
+    drafted = await options.draft({ order, clauses: known, ticketText: payload.body, assessment });
+  } catch (error) {
+    db.prepare("INSERT INTO audit_events (ticket_id, kind, payload_json, created_at) VALUES (?, 'model_failed', ?, ?)").run(
+      ticket.id,
+      JSON.stringify({ message: error instanceof Error ? error.message : "model failed" }),
+      now(),
+    );
+    return "I couldn't draft that. Nothing was executed.";
+  }
+  await afterRecovery(options);
+  const citations = splitCitations(drafted.cited_chunk_ids, known.map((clause) => clause.id));
+  const rendered = composeDraftPost({
+    assessment,
+    customerReply: drafted.customer_reply,
+    clauses: known,
+    acceptedCitationIds: citations.accepted,
+    version: ticket.proposal_version,
+  });
+  const created = now();
+  db.exec("BEGIN");
+  try {
+    const updated = db
+      .prepare(
+        `UPDATE tickets
+         SET needs_refresh = 0, summary = ?, label = ?, eligibility = ?, rendered_reply = ?, status = 'awaiting_approval'
+         WHERE id = ? AND needs_refresh = 1`,
+      )
+      .run(assessment.summary, assessment.label, assessment.eligibility, rendered, ticket.id) as { changes: number };
+    if (Number(updated.changes) !== 1) {
+      db.exec("ROLLBACK");
+      const current = db.prepare("SELECT rendered_reply FROM tickets WHERE id = ?").get(ticket.id) as { rendered_reply: string | null };
+      return current.rendered_reply ?? rendered;
+    }
+    const draftId = randomUUID();
+    db.prepare(
+      `INSERT INTO drafts (id, ticket_id, proposal_version, customer_reply, internal_note, created_at, trigger_message_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(draftId, ticket.id, ticket.proposal_version, drafted.customer_reply, drafted.internal_note, created, payload.message_id);
+    const cite = db.prepare("INSERT INTO draft_citations (draft_id, chunk_id, accepted) VALUES (?, ?, ?)");
+    for (const id of citations.accepted) cite.run(draftId, id, 1);
+    for (const id of citations.rejected) cite.run(draftId, id, 0);
+    const proposal = db.prepare(
+      "INSERT INTO proposals (id, ticket_id, proposal_version, action, status) VALUES (?, ?, ?, ?, 'pending')",
+    );
+    for (const action of assessment.proposedActions) proposal.run(randomUUID(), ticket.id, ticket.proposal_version, action);
+    db.prepare("INSERT INTO audit_events (ticket_id, kind, payload_json, created_at) VALUES (?, 'draft_stored', ?, ?)").run(
+      ticket.id,
+      JSON.stringify({ proposal_version: ticket.proposal_version, eligibility: assessment.eligibility, resent: true }),
+      created,
+    );
+    recordLlmCall(db, {
+      ticketId: ticket.id,
+      provider: options.provider,
+      model: options.model,
+      prompt: payload.body,
+      response: drafted,
+      latencyMs: 0,
+    });
     db.exec("COMMIT");
     return rendered;
   } catch (error) {
