@@ -125,7 +125,7 @@ The attached brief says "SSE in, HTTP out." That is the old client. **SSE is dep
 
 Registration, once:
 
-- `POST /agents` with a **registration** API key (`Authorization: Bearer`). An agent API key cannot register. The key is created on the Gateway API Keys page; its creator becomes the agent owner. A brand-new deployment can use its bootstrap key instead.
+- `POST /agents` with a **registration** API key (`Authorization: Bearer`). An agent API key cannot register. The key is created on the Gateway API Keys page; its creator becomes the agent owner. A brand-new deployment can use its bootstrap key instead. Refund Desk does not: that key's agents belong to a dedicated account, so owner-only approval would not bind Rohit. He creates a registration key on the Gateway after Console signs him in.
 - Do **not** call `POST /agents/register-known`. That route only registers the agent types Console runs.
 - Body requires `name` (`^[a-z0-9][a-z0-9._-]*$`), `description`, `connector_type` (free-form), and `integration_profile`.
 - `integration_profile` requires `connection_model` (`always_on`, `session_addressable`, `auto_session`, or `session_passive`), `message_exchange` (boolean), and `pre_invocation_mediation`, `post_invocation_mediation`, `event_reporting` (send `[]` if unused).

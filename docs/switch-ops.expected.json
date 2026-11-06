@@ -1,0 +1,16 @@
+{
+  "post_message": {
+    "room_id": "room id string, required",
+    "content": "markdown string, required",
+    "thread_id": "thread id string, required; client refuses to post without it"
+  },
+  "read_context": {
+    "room_id": "room id string, required",
+    "limit": "integer, optional; omitted on retry if the live schema rejects it"
+  },
+  "update_agent_detail": {
+    "agent_id": "agent id string, required",
+    "addressing": "owner_only"
+  },
+  "notes": "Live input_schema from GET /agents/{id}/ops wins. If post_message does not mention thread_id, the client exits. Discovery is written to data/switch-discovery.json on Rohit's machine."
+}

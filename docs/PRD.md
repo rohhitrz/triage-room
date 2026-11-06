@@ -2,105 +2,77 @@
 
 ## Decision
 
-Keep the support-room hypothesis. Sharpen it into a refund desk with a tool-level approval gate. Do not ship the attached "label the ticket and draft a reply" loop as the product, and do not depend on `dukaan-agent`.
+Keep Refund Desk for Track 01. The design review changes how approval, drafting, and the build are done. It does not change the product.
 
-Why this is the winnable 24-hour project:
-
-- Track 01 pays for a practical workflow a real team already does. Duplicate charges and "don't refund until a person says so" are that workflow. Track 02 (personal/creative) fits Rohit's stack less well. Track 03 pays $100 per PR, needs an assigned `hackathon` issue and a CLA, and loses if the issue is already taken. It is not the plan.
-- Use of Switch is 30% of the published rubric. The agent is useless without the room: the approval is a message id in that room, and the actions are posted back into it.
-- The event page's sample is already a triage pair that labels a report and hands a bug to a reproducer. A room that only restates and labels will look like that sample. The difference a judge can see in under two minutes is a refused action, then an allowed one, tied to a sentence the human typed.
-- Technical execution is 25%. `LLM_MODE=scripted` plus gate tests let a judge clone the repo and run the workflow without an API key. A prompt-only Claude Code session does not.
-- Rohit's stack (TypeScript, Next.js, tool calling, a small retrieval set, evals) covers the build. Python, FastAPI, pgvector, and Langfuse do not earn a place in the critical path. One language, one file database, one model call.
+A human and one agent finish a duplicate-charge ticket in a Switch room. The model writes the customer wording. Code decides eligibility from the order and all three policy clauses. Nothing is sent, flagged, or recorded as a refund until a fail-closed approval in that thread binds the owner, the proposal version, and the exact actions. The filmed demo uses a real model. A local HTML page shows the ledger, including a blocked attempt.
 
 ## Problem
 
-Support work happens in a team channel. The decision to refund is a policy decision, and the act of telling the customer is hard to undo. A coding agent in a terminal can draft the reply. It cannot show a teammate the draft, and a sentence in its system prompt cannot stop it calling a refund tool. Switch will carry the conversation. It will not inspect the tool call. ([Shared responsibility](https://docs.switchagents.ai/switch-rooms/resources/shared-responsibility.md).)
+A refund is easy to promise and hard to undo. Switch will carry the conversation between the teammate and the agent. It will not inspect the tool call. The control has to sit in the process that would perform the action, and it has to fail closed when the sentence is sloppy.
 
 ## Users
 
-| User | In this hackathon | What they need |
+| User | Who they are here | What they need |
 | --- | --- | --- |
-| Support teammate | Rohit, playing the human in Mattermost | Paste a ticket, read a short draft in the thread, approve specific actions in that thread. |
-| Support agent | `refund-desk` | Facts from the order book and the policy, a draft, and a hard stop. |
-| Reviewer / judge | Clones the public repo | A README, a video, and a scripted path that reproduces the room. |
-| Finance (off-screen) | Nobody | A ledger row that says they were flagged. No real payout. |
+| Support teammate | Rohit, in Mattermost | A short unsent draft, a clear pending list, and a way to approve exact actions. |
+| Agent | `refund-desk` | The order, all three clauses, one model draft, and a gate it cannot talk its way around. |
+| Judge | Clones the repo, watches the video | A real model in the video, tests that pass without Switch, and a README that reaches a room on their own Console. |
 
-There is one human and one agent. A second agent doubles the protocol work and copies the sample template.
+One human, one agent.
 
 ## Goals
 
-- A human and `refund-desk` complete one refund ticket inside a Switch room on bundled Mattermost.
-- The agent cites a clause from a written policy, not a general essay about refunds.
-- `send_customer_reply` and `flag_finance` run only after an in-thread approval that names them, or after a bare `Approved` that accepts the proposed set.
-- `issue_refund` does not run in the demo, and a test proves it returns `denied` when the approval did not name it.
-- The board shows the ticket, the cited clause, the draft, the approval message id, and each action's outcome.
-- The scripted path and the gate tests pass with no network.
+- The filmed ticket is drafted by a live OpenAI-compatible model (OpenAI or Gemini).
+- Eligibility and the proposed action set come from code, using the order row and all three clauses.
+- The customer reply is shown as an unsent draft until a ledger row says a simulated send happened.
+- A blocked approval is visible in the audit log, with a reason, before the authorized actions run.
+- `Approved, don't send the reply` executes nothing.
+- A valid approval names the owner, a non-null thread, the current proposal version, and the exact actions. A new draft invalidates it.
+- Simulated send, finance flag, and refund record are labeled as simulated. No email, no finance system, no payment.
+- `npm test` covers the gate, grounding, and durability without a model key and without Switch.
 
 ## Non-goals
 
-- A real payment processor, a real inbox, or a real ticketing product. `send_customer_reply` writes the reply into the ledger and posts a confirmation in the room. It does not email anyone.
-- Slack, Teams, Discord, Telegram, interactive Mattermost buttons, Switch Trust, Switch ROI.
-- A second agent, roles, cross-room handoff, or a task protocol (Switch removed the task tools).
-- pgvector, a hosted vector database, Langfuse as a required service, multi-step tool calling by the model.
-- A public deployment. A live URL is not a submission field. Tunneling the board is a stretch after the video is cut.
-- Console-managed Claude Code / Codex as the worker. Those are fine for writing the code. They are the wrong runtime for the room agent, because the gate has to sit in our process.
-- Using `dukaan-agent` as a library. Patterns can be copied into this repo during the build. A second repo is not a dependency.
-- Wispr and the blog, unless Rohit actually dictates or publishes. They are not part of the build.
+- Real email, real finance, real card refunds.
+- Full-text search, pgvector, Langfuse, a second process, Next.js.
+- Bootstrap-key registration. That key's owner is a dedicated account, not Rohit, so owner-only approval would not bind to him.
+- Channel-root posts, Mattermost buttons, Slack, Switch Trust.
+- Scripted wording in the demo video. Scripted mode is for tests and CI.
+- A browser token. The page is loopback-only.
 
-## User stories
+## Demo story
 
-1. As the teammate, I post `@refund-desk Order #4821 charged twice, customer wants a refund.` and get, in that thread, a restatement, the label `refund`, the duplicate-charge clause, a customer draft, and an explicit list of actions waiting for approval.
-2. As the teammate, I reply `@refund-desk Approved, send the reply and flag finance.` and the agent confirms those two actions and no others.
-3. As the teammate, I say `looks good` and the agent asks for the word `Approved` plus the actions. Nothing is sent.
-4. As the teammate, I paste a ticket whose text claims the customer already approved by email. The agent still waits. The refund tool stays denied.
-5. As the teammate, I post order `#1008` (outside the 30-day window). The agent drafts a polite refusal and proposes no refund.
-6. As a judge, I run the seed, the agent, and the board against my own Console and see the same ledger the room wrote.
+Order `#4821` is a duplicate charge inside the 30-day window. Code proposes `send_reply`, `flag_finance`, and `issue_refund`. Absence of a proposal is not how we show a refusal. The film shows a real blocked request, then the actions that were authorized.
 
-## Demo ticket
+1. `@refund-desk Order #4821 charged twice, customer wants a refund.`
+2. Agent posts the unsent draft, the code's eligibility, the clauses it used, and proposal version 1. Nothing is executed.
+3. `@refund-desk Approved, don't issue the refund.` Agent posts that the approval was blocked because it contains a negation. The audit row carries that reason. Every proposal stays pending.
+4. `@refund-desk Approved, send the reply and flag finance.` Agent posts only what the ledger committed: simulated send, simulated finance flag, `issue_refund` still pending. Pending is not a refusal.
 
-Order `#4821`, customer charged twice, within the refund window, status paid. The policy says refund the duplicate only, tell the customer, and flag finance. The proposed actions are `send_reply` and `flag_finance`. `issue_refund` is a stronger action the demo does not approve, so the video can show a line that was not taken.
+## Stories the tests pin
 
-Two extra seed orders exist so the eval is not a single fixture: `#1008` is too old, `#2204` was charged once and is a shipping question rather than a refund.
-
-## Scope for the build
-
-In, in this order (see [BUILD_PLAN.md](BUILD_PLAN.md)):
-
-1. SQLite ledger, seed orders, seed policy.
-2. Retrieval and the three gated tools, with tests, before any Switch socket.
-3. A protocol client that registers, stays connected, and posts.
-4. One orchestrator: parse the order id, load facts, one structured draft, post a composed reply (never the raw model text).
-5. Approval parsing and execution of only the approved names.
-6. A read-only Next.js board.
-7. README demo section filled with the real commands, and a room-instructions file taken from a room that actually exists.
-
-Out if the socket slips: the board shrinks to one server-rendered page, live LLM mode is skipped, and the video uses scripted mode. The gate tests and the Mattermost thread stay. Those two are the submission.
+- Negation, a question mark, or leftover words do not approve.
+- A bare `Approved` binds the exact pending set at the current version.
+- Wrong thread, null thread, or a sender who is not the configured owner does not approve.
+- After the draft changes, the old approval does not execute.
+- A crash after the event is queued still leads to one execution. A duplicate delivery does not create a second one. A gap does not move the sequence checkpoint.
+- An unknown citation id is rejected and is not shown as policy.
 
 ## Success metrics
 
-Measured before submit, not as a dashboard vanity number:
-
 | Check | Pass |
 | --- | --- |
-| Room | `refund-desk` replies in the Mattermost thread to the `#4821` prompt. |
-| Gate | Approving `send_reply` and `flag_finance` leaves `issue_refund` unexecuted. A missing approval denies all three. |
-| Repro | `npm test` passes with no API key and no Switch. The scripted room path is written down well enough that Rohit can reset and re-film. |
-| Presentation | Video under two minutes shows the channel and one cut of the board. README states the Switch steps. |
-| Switch-shaped | Stopping the agent process stops the replies. The board alone cannot approve anything. |
+| Room | Live model draft appears in the Mattermost thread for `#4821`. |
+| Block | The negation produces an audit reason and no executed row. |
+| Allow | Send and finance flag execute only after the affirmative approval, and the chat text matches the ledger. |
+| Tests | `npm test` passes with no network. |
+| Machine | Rohit can follow the README and see a real reply in under 30 minutes, assuming Docker is already installed. |
 
 ## Risks
 
-| Risk | Why it matters | Response |
-| --- | --- | --- |
-| Protocol client takes the day | 30% of the score is Switch, and the socket has no library. | Build the echo-and-post client before the draft. If it fails, the submission is not a standalone web app. |
-| Console claims the agent | `managed_by_controller` closes the socket. | Register only via `POST /agents`. Do not also create a Console agent with that name. First hour proves the socket survives. |
-| Account not linked | Owner-only agent ignores the human. | Linking Mattermost is a setup step in the README, before any prompt tuning. |
-| Model claims it refunded | A judge reads the transcript and the tool did something else, or the model skips the wait. | Chat text is composed by our code from structured fields. Side effects happen only in the gate. |
-| Sample-shaped project | Creativity is 25%. | The filmed difference is the refused refund, not the label. |
-| Windows/Linux Console rough edges | Early access. | Prefer macOS. Budget time for Docker and the first room, not for a second chat app. |
-| Prize pages disagree | Submitting to the wrong mental model. | Enter Track 01 against the WeMakeDevs page. Re-read both pages on submit day. |
-| Age or affiliation | Rules can void the prize after the work. | Rohit confirms he is 18+ and not with the Sponsor, judges, or their households. |
-
-## Open questions
-
-Carried in the phase-1 report. None of them change the shape above. The one that can change setup steps is the Gateway click-path for a registration key on a Console-bundled server, which phase 2 checks before writing the client against a guess.
+| Risk | Response |
+| --- | --- |
+| Live `post_message` schema has no thread field | Client refuses to post. He records the discovered schema. We do not fall back to the channel root. |
+| Owner participant id is unknown until the first message | Approvals fail closed until `SWITCH_OWNER_PARTICIPANT_ID` is set from that sender id. |
+| Model timeout during filming | He retries the ticket. The agent does not substitute the scripted fixture. |
+| Console early access on Linux | Prefer macOS. The fake server proves the client; his smoke checklist proves the real server. |
