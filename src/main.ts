@@ -6,10 +6,9 @@ import { migrate } from "./db/migrate.ts";
 import { openDatabase } from "./db/open.ts";
 import { seed, DEMO_TODAY } from "./db/seed.ts";
 import { startLedger } from "./http/ledger.ts";
-import { checkpoint, claimNext, enqueueGap, enqueueMessage, markCompleted, markFailed, reclaimProcessing } from "./ledger/inbox.ts";
-import { handleDomainMessage } from "./orchestrator.ts";
+import { deliverQueued } from "./ledger/deliver.ts";
+import { checkpoint, claimNext, enqueueGap, enqueueMessage, reclaimProcessing, scheduleDeliveryRetry } from "./ledger/inbox.ts";
 import { SwitchClient } from "./switch/client.ts";
-import type { DomainMessage } from "./switch/protocol.ts";
 
 loadEnv();
 assertRunnableMode(process.env.LLM_MODE ?? "live");
@@ -74,37 +73,30 @@ async function pump(): Promise<void> {
       continue;
     }
     try {
-      const frame = JSON.parse(row.payload_json) as DomainMessage;
-      const text = await handleDomainMessage(db, frame, {
-        ownerId: process.env.SWITCH_OWNER_PARTICIPANT_ID || null,
-        today,
-        provider: optionalEnv(process.env.LLM_PROVIDER) ?? "openai",
-        model: optionalEnv(process.env.LLM_MODEL) || (optionalEnv(process.env.LLM_PROVIDER) === "gemini" ? "gemini-2.5-flash" : "gpt-4o-mini"),
-        draft: (input) =>
-          liveDraft({
-            provider: optionalEnv(process.env.LLM_PROVIDER) ?? "openai",
-            apiKey: process.env.LLM_API_KEY ?? "",
-            model: optionalEnv(process.env.LLM_MODEL),
-            baseUrl: optionalEnv(process.env.LLM_BASE_URL),
-            ...input,
-          }),
-      });
-      if (text) {
-        const threadId = frame.data.payload.thread_id ?? threadForSource(frame.data.payload.message_id) ?? frame.data.payload.message_id;
-        if (!threadId) throw new Error("refusing to post without a thread id");
-        await client.post(text, threadId);
-      }
-      markCompleted(db, row.id);
+      await deliverQueued(
+        db,
+        row,
+        {
+          ownerId: process.env.SWITCH_OWNER_PARTICIPANT_ID || null,
+          today,
+          provider: optionalEnv(process.env.LLM_PROVIDER) ?? "openai",
+          model: optionalEnv(process.env.LLM_MODEL) || (optionalEnv(process.env.LLM_PROVIDER) === "gemini" ? "gemini-2.5-flash" : "gpt-4o-mini"),
+          draft: (input) =>
+            liveDraft({
+              provider: optionalEnv(process.env.LLM_PROVIDER) ?? "openai",
+              apiKey: process.env.LLM_API_KEY ?? "",
+              model: optionalEnv(process.env.LLM_MODEL),
+              baseUrl: optionalEnv(process.env.LLM_BASE_URL),
+              ...input,
+            }),
+        },
+        (body, threadId) => client.post(body, threadId),
+      );
     } catch (error) {
-      markFailed(db, row.id);
+      scheduleDeliveryRetry(db, row.id, error, 1_000);
       console.error(error instanceof Error ? error.message : error);
     }
   }
-}
-
-function threadForSource(messageId: string): string | null {
-  const row = db.prepare("SELECT thread_id FROM tickets WHERE source_message_id = ?").get(messageId) as { thread_id: string } | undefined;
-  return row?.thread_id ?? null;
 }
 
 function loadAgent(): { id: string; api_key: string; connection_id: string } {

@@ -67,6 +67,20 @@ export async function handleDomainMessage(db: DatabaseSync, frame: DomainMessage
     now(),
   );
 
+  const savedDraft = db.prepare("SELECT rendered_reply FROM tickets WHERE source_message_id = ?").get(payload.message_id) as
+    | { rendered_reply: string | null }
+    | undefined;
+  if (savedDraft?.rendered_reply) return savedDraft.rendered_reply;
+
+  const savedApproval = db.prepare("SELECT id, ticket_id FROM approvals WHERE message_id = ?").get(payload.message_id) as
+    | { id: string; ticket_id: string }
+    | undefined;
+  if (savedApproval) {
+    const done = db.prepare("SELECT COUNT(*) AS n FROM actions WHERE approval_id = ?").get(savedApproval.id) as { n: number };
+    if (Number(done.n) === 0) executeApproval(db, savedApproval.id);
+    return composeLedgerPost(db, savedApproval.ticket_id);
+  }
+
   const ticket = findTicket(db, payload);
   if (ticket) return handleInThread(db, ticket, payload, options);
   return openTicket(db, frame, options);
@@ -197,19 +211,21 @@ async function openTicket(db: DatabaseSync, frame: DomainMessage, options: Orche
       response: drafted,
       latencyMs: Date.now() - started,
     });
+    const rendered = composeDraftPost({
+      assessment,
+      customerReply: drafted.customer_reply,
+      clauses: known,
+      acceptedCitationIds: citations.accepted,
+      version: 1,
+    });
+    db.prepare("UPDATE tickets SET rendered_reply = ? WHERE id = ?").run(rendered, ticketId);
     db.prepare("UPDATE room_messages SET ticket_id = ? WHERE message_id = ?").run(ticketId, payload.message_id);
     db.exec("COMMIT");
+    return rendered;
   } catch (error) {
     db.exec("ROLLBACK");
     throw error;
   }
-  return composeDraftPost({
-    assessment,
-    customerReply: drafted.customer_reply,
-    clauses: known,
-    acceptedCitationIds: citations.accepted,
-    version: 1,
-  });
 }
 
 function rebuildPost(db: DatabaseSync, ticketId: string) {

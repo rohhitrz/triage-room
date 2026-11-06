@@ -59,6 +59,8 @@ export function reclaimProcessing(db: DatabaseSync): void {
   db.prepare("UPDATE inbox SET state = 'queued' WHERE state IN ('processing', 'failed')").run();
 }
 
+export const MAX_DELIVERY_ATTEMPTS = 5;
+
 export function claimNext(db: DatabaseSync): InboxRow | null {
   db.exec("BEGIN IMMEDIATE");
   try {
@@ -66,9 +68,10 @@ export function claimNext(db: DatabaseSync): InboxRow | null {
       .prepare(
         `SELECT id, sequence, message_id, kind, payload_json, state, attempts
          FROM inbox WHERE state = 'queued' AND kind = 'message'
+           AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
          ORDER BY sequence ASC LIMIT 1`,
       )
-      .get() as InboxRow | undefined;
+      .get(now()) as InboxRow | undefined;
     if (!row) {
       db.exec("COMMIT");
       return null;
@@ -88,4 +91,23 @@ export function markCompleted(db: DatabaseSync, id: number): void {
 
 export function markFailed(db: DatabaseSync, id: number): void {
   db.prepare("UPDATE inbox SET state = 'failed', finished_at = ? WHERE id = ?").run(now(), id);
+}
+
+export function scheduleDeliveryRetry(db: DatabaseSync, inboxId: number, error: unknown, backoffMs: number): "retry" | "dead" {
+  const row = db.prepare("SELECT attempts FROM inbox WHERE id = ?").get(inboxId) as { attempts: number };
+  const message = error instanceof Error ? error.message : String(error);
+  if (row.attempts >= MAX_DELIVERY_ATTEMPTS) {
+    markFailed(db, inboxId);
+    db.prepare("UPDATE inbox SET last_error = ? WHERE id = ?").run(message, inboxId);
+    db.prepare("UPDATE outbox SET state = 'dead', last_error = ? WHERE inbox_id = ? AND state = 'pending'").run(message, inboxId);
+    return "dead";
+  }
+  const when = new Date(Date.now() + backoffMs).toISOString();
+  db.prepare("UPDATE inbox SET state = 'queued', next_attempt_at = ?, last_error = ? WHERE id = ?").run(when, message, inboxId);
+  db.prepare("UPDATE outbox SET attempts = attempts + 1, next_attempt_at = ?, last_error = ? WHERE inbox_id = ? AND state = 'pending'").run(
+    when,
+    message,
+    inboxId,
+  );
+  return "retry";
 }
