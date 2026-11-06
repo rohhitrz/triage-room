@@ -13,6 +13,7 @@ import {
   type OrderRow,
 } from "./policy/ground.ts";
 import type { DomainMessage } from "./switch/protocol.ts";
+import type { RecoveryGate } from "./switch/recovery.ts";
 
 export type DraftFn = (input: {
   order: OrderRow;
@@ -27,6 +28,7 @@ export type OrchestratorOptions = {
   provider: string;
   model: string;
   draft: DraftFn;
+  recovery?: RecoveryGate;
 };
 
 type TicketRow = {
@@ -50,7 +52,12 @@ export function threadKey(payload: DomainMessage["data"]["payload"]): string | n
   return payload.thread_id || null;
 }
 
+async function afterRecovery(options: OrchestratorOptions): Promise<void> {
+  await options.recovery?.wait();
+}
+
 export async function handleDomainMessage(db: DatabaseSync, frame: DomainMessage, options: OrchestratorOptions): Promise<string | null> {
+  await afterRecovery(options);
   const payload = frame.data.payload;
   if (!payload.addressed) return null;
   db.prepare(
@@ -143,7 +150,17 @@ async function handleInThread(
     ).run(approvalId, ticket.id, payload.message_id, payload.thread_id, payload.sender, ticket.proposal_version, payload.body, JSON.stringify(bound.actions), now());
   }
   const already = db.prepare("SELECT COUNT(*) AS n FROM actions WHERE approval_id = ?").get(approvalId) as { n: number };
-  if (Number(already.n) === 0) executeApproval(db, approvalId);
+  if (Number(already.n) === 0) {
+    await afterRecovery(options);
+    const fresh = db.prepare("SELECT needs_refresh, proposal_version FROM tickets WHERE id = ?").get(ticket.id) as {
+      needs_refresh: number;
+      proposal_version: number;
+    };
+    if (fresh.needs_refresh || fresh.proposal_version !== ticket.proposal_version) {
+      return "This proposal was cleared because room history could not be verified after a gap. Repost the ticket text in this thread, or start a new root message. Nothing was executed.";
+    }
+    executeApproval(db, approvalId);
+  }
   return composeLedgerPost(db, ticket.id);
 }
 
@@ -171,6 +188,7 @@ async function openTicket(db: DatabaseSync, frame: DomainMessage, options: Orche
     );
     return "I couldn't draft that. Nothing was executed.";
   }
+  await afterRecovery(options);
 
   const citations = splitCitations(drafted.cited_chunk_ids, known.map((clause) => clause.id));
   const threadId = payload.thread_id ?? payload.message_id;

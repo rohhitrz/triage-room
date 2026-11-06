@@ -10,6 +10,7 @@ import { deliverQueued } from "./ledger/deliver.ts";
 import { reconcileAfterGap } from "./ledger/gap.ts";
 import { claimNext, enqueueGap, enqueueMessage, reclaimProcessing, resumeSequence, scheduleDeliveryRetry } from "./ledger/inbox.ts";
 import { SwitchClient } from "./switch/client.ts";
+import { RecoveryGate } from "./switch/recovery.ts";
 
 loadEnv();
 assertRunnableMode(process.env.LLM_MODE ?? "live");
@@ -34,6 +35,7 @@ const server = await startLedger(db, port);
 const address = server.address();
 console.log(`ledger http://127.0.0.1:${typeof address === "object" && address ? address.port : port}`);
 
+const recovery = new RecoveryGate();
 const client = new SwitchClient({
   baseUrl: process.env.SWITCH_BASE_URL,
   agentId: saved.id,
@@ -41,6 +43,7 @@ const client = new SwitchClient({
   connectionId: saved.connection_id,
   roomId: process.env.SWITCH_ROOM_ID,
   getCursor: () => resumeSequence(db),
+  recovery,
   reconnectDelayMs: 1000,
   onDomainEvent: async (frame) => {
     const payload = frame.data.payload;
@@ -69,6 +72,7 @@ await pump();
 
 async function pump(): Promise<void> {
   for (;;) {
+    await recovery.wait();
     const row = claimNext(db);
     if (!row) {
       await new Promise((resolve) => setTimeout(resolve, 150));
@@ -83,6 +87,7 @@ async function pump(): Promise<void> {
           today,
           provider: optionalEnv(process.env.LLM_PROVIDER) ?? "openai",
           model: optionalEnv(process.env.LLM_MODEL) || (optionalEnv(process.env.LLM_PROVIDER) === "gemini" ? "gemini-2.5-flash" : "gpt-4o-mini"),
+          recovery,
           draft: (input) =>
             liveDraft({
               provider: optionalEnv(process.env.LLM_PROVIDER) ?? "openai",

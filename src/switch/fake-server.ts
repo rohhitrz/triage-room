@@ -17,6 +17,7 @@ export class FakeSwitch {
   omitThreadInSchema = false;
   rejectLimit = false;
   contextMessages: unknown[] = [];
+  holdContext: Promise<void> | null = null;
   failAddressing = false;
   private generation = 1;
 
@@ -156,6 +157,7 @@ export class FakeSwitch {
         return;
       }
       if (ops[2] === "read_context") {
+        if (this.holdContext) await this.holdContext;
         if (this.rejectLimit && Object.hasOwn(body, "limit")) {
           res.writeHead(400, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ error: "unexpected limit" }));

@@ -1,6 +1,7 @@
 import WebSocket from "ws";
 import { discoverSwitch, schemaMentionsThread, type Discovery } from "./discover.ts";
 import { frameKind, isDomainMessage, parseContextMessages, type ContextMessage, type DomainMessage, type GapFrame } from "./protocol.ts";
+import type { RecoveryGate } from "./recovery.ts";
 
 export type SwitchClientOptions = {
   baseUrl: string;
@@ -11,6 +12,7 @@ export type SwitchClientOptions = {
   getCursor: () => number;
   onDomainEvent: (frame: DomainMessage) => Promise<void>;
   onGap: (frame: GapFrame, messages: ContextMessage[]) => Promise<void>;
+  recovery?: RecoveryGate;
   fetchImpl?: typeof fetch;
   reconnect?: boolean;
   reconnectDelayMs?: number;
@@ -128,7 +130,10 @@ export class SwitchClient {
           void this.readContext().then(() => resolve(), reject);
           return;
         }
-        void this.dispatch(frame);
+        if (kind === "gap") this.options.recovery?.hold();
+        void this.dispatch(frame).finally(() => {
+          if (kind === "gap") this.options.recovery?.release();
+        });
       });
 
       socket.on("close", () => {
@@ -190,7 +195,12 @@ export class SwitchClient {
   private async dispatch(frame: Record<string, unknown>): Promise<void> {
     const kind = frameKind(frame);
     if (kind === "gap") {
-      const messages = await this.readContext();
+      let messages: ContextMessage[] = [];
+      try {
+        messages = await this.readContext();
+      } catch {
+        messages = [];
+      }
       await this.options.onGap(frame as GapFrame, messages);
       return;
     }
