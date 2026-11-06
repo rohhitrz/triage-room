@@ -15,5 +15,5 @@ if (!baseUrl || !agentId || !agentKey) {
   console.error("Need SWITCH_BASE_URL and a registered agent. Run npm run register first.");
   process.exit(1);
 }
-const rooms = await listRooms({ baseUrl, agentId, agentKey });
+const rooms = await listRooms({ baseUrl, agentId, apiKey: agentKey });
 console.log(JSON.stringify(rooms, null, 2));

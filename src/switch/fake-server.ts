@@ -8,6 +8,7 @@ export class FakeSwitch {
   wss: WebSocketServer | null = null;
   agents = new Map<string, AgentRecord>();
   posts: Array<{ path: string; body: Record<string, unknown>; connectionId: string | null }> = [];
+  auths: string[] = [];
   contextCalls: Array<{ body: Record<string, unknown>; connectionId: string | null }> = [];
   openUrls: string[] = [];
   pongs: Array<{ cursor: number }> = [];
@@ -86,6 +87,7 @@ export class FakeSwitch {
       return;
     }
     const auth = req.headers.authorization ?? "";
+    if (auth) this.auths.push(auth);
     if (req.method === "POST" && url.pathname === "/agents") {
       if (auth !== `Bearer ${this.registrationKey}`) {
         res.writeHead(401);
