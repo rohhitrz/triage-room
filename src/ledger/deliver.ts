@@ -3,7 +3,7 @@ import type { DatabaseSync } from "node:sqlite";
 import type { OrchestratorOptions } from "../orchestrator.ts";
 import { handleDomainMessage } from "../orchestrator.ts";
 import type { DomainMessage } from "../switch/protocol.ts";
-import { markCompleted, scheduleDeliveryRetry, type InboxRow } from "./inbox.ts";
+import { markCompleted, markFailed, scheduleDeliveryRetry, type InboxRow } from "./inbox.ts";
 
 function now(): string {
   return new Date().toISOString();
@@ -24,6 +24,10 @@ export async function deliverQueued(
   if (stored?.state === "sent") {
     markCompleted(db, row.id);
     return "sent";
+  }
+  if (stored?.state === "dead") {
+    markFailed(db, row.id);
+    return "dead";
   }
   if (!stored) {
     const text = await handleDomainMessage(db, frame, options);

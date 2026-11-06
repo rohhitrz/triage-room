@@ -70,11 +70,12 @@ export function enqueueGap(db: DatabaseSync, frame: GapFrame): void {
   if (checkpoint(db) !== receipt) throw new Error("gap moved the receipt cursor");
 }
 
-export function reclaimProcessing(db: DatabaseSync): void {
-  db.prepare("UPDATE inbox SET state = 'queued' WHERE state IN ('processing', 'failed')").run();
-}
-
 export const MAX_DELIVERY_ATTEMPTS = 5;
+
+export function reclaimProcessing(db: DatabaseSync): void {
+  db.prepare("UPDATE inbox SET state = 'failed' WHERE state = 'processing' AND attempts >= ?").run(MAX_DELIVERY_ATTEMPTS);
+  db.prepare("UPDATE inbox SET state = 'queued' WHERE state = 'processing' AND attempts < ?").run(MAX_DELIVERY_ATTEMPTS);
+}
 
 export function claimNext(db: DatabaseSync): InboxRow | null {
   db.exec("BEGIN IMMEDIATE");
@@ -83,10 +84,11 @@ export function claimNext(db: DatabaseSync): InboxRow | null {
       .prepare(
         `SELECT id, sequence, message_id, kind, payload_json, state, attempts
          FROM inbox WHERE state = 'queued' AND kind = 'message'
+           AND attempts < ?
            AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
          ORDER BY sequence ASC LIMIT 1`,
       )
-      .get(now()) as InboxRow | undefined;
+      .get(MAX_DELIVERY_ATTEMPTS, now()) as InboxRow | undefined;
     if (!row) {
       db.exec("COMMIT");
       return null;

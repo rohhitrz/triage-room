@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { scriptedDraft } from "../src/draft/llm.ts";
 import { deliverQueued } from "../src/ledger/deliver.ts";
-import { claimNext, enqueueMessage } from "../src/ledger/inbox.ts";
+import { claimNext, enqueueMessage, MAX_DELIVERY_ATTEMPTS, reclaimProcessing } from "../src/ledger/inbox.ts";
 import { handleDomainMessage, type OrchestratorOptions } from "../src/orchestrator.ts";
 import type { DomainMessage } from "../src/switch/protocol.ts";
 import { tempDb } from "./helpers.ts";
@@ -105,6 +105,38 @@ test("a failed chat post is requeued with the saved body and does not redraft", 
     assert.match(sent[0] ?? "", /Unsent draft/);
     assert.equal((db.prepare("SELECT state FROM outbox").get() as { state: string }).state, "sent");
     assert.equal((db.prepare("SELECT COUNT(*) AS n FROM actions").get() as { n: number }).n, 0);
+  } finally {
+    close();
+  }
+});
+
+test("five delivery failures stay terminal after a restart", async () => {
+  const { db, close } = tempDb();
+  try {
+    const opts = options(async () => scriptedDraft("4821"));
+    enqueueMessage(db, frame("@refund-desk Order #4821 charged twice, customer wants a refund.", "m-dead", 6));
+    let result = "";
+    for (let attempt = 0; attempt < MAX_DELIVERY_ATTEMPTS; attempt += 1) {
+      const row = claimNext(db);
+      assert.ok(row);
+      result = await deliverQueued(db, row, opts, async () => {
+        throw new Error("socket down");
+      }, () => 0);
+    }
+    assert.equal(result, "dead");
+    assert.equal((db.prepare("SELECT state FROM inbox WHERE message_id = 'm-dead'").get() as { state: string }).state, "failed");
+    assert.equal((db.prepare("SELECT state FROM outbox WHERE source_message_id = 'm-dead'").get() as { state: string }).state, "dead");
+    reclaimProcessing(db);
+    assert.equal(claimNext(db), null);
+    db.prepare("UPDATE inbox SET state = 'queued', attempts = 0, next_attempt_at = NULL WHERE message_id = 'm-dead'").run();
+    const forced = claimNext(db);
+    assert.ok(forced);
+    let posted = 0;
+    const again = await deliverQueued(db, forced, opts, async () => {
+      posted += 1;
+    }, () => 0);
+    assert.equal(again, "dead");
+    assert.equal(posted, 0);
   } finally {
     close();
   }
