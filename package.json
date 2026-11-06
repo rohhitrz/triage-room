@@ -15,6 +15,6 @@
     "db:seed": "node --experimental-strip-types --disable-warning=ExperimentalWarning src/db/seed-cli.ts"
   },
   "dependencies": {
-    "ws": "^8.18.3"
+    "ws": "^8.22.1"
   }
 }
