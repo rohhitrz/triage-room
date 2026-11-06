@@ -14,7 +14,7 @@ function threadTicket(db: DatabaseSync, id: string, threadId: string, sourceId: 
     ) VALUES (?, 'room_1', ?, ?, '4821', 'refund', 'eligible', 'awaiting_approval', 'summary', 1, ?)`,
   ).run(id, threadId, sourceId, created);
   db.prepare(
-    `INSERT INTO proposals (id, ticket_id, proposal_version, action, status) VALUES (?, ?, 1, 'issue_refund', 'pending')`,
+    `INSERT INTO proposals (id, ticket_id, proposal_version, action, status, order_id) VALUES (?, ?, 1, 'issue_refund', 'pending', '4821')`,
   ).run(`pr_${id}`, id);
   db.prepare(
     `INSERT INTO approvals (

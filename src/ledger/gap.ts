@@ -20,9 +20,17 @@ export function reconcileAfterGap(db: DatabaseSync, messages: ContextMessage[]):
   const refreshed: string[] = [];
   for (const ticket of tickets) {
     const approvals = db
-      .prepare("SELECT message_id FROM approvals WHERE ticket_id = ? AND invalidated_at IS NULL")
-      .all(ticket.id) as Array<{ message_id: string }>;
-    const sourceSeen = seen.has(ticket.source_message_id);
+      .prepare("SELECT message_id FROM approvals WHERE ticket_id = ? AND invalidated_at IS NULL AND proposal_version = ?")
+      .all(ticket.id, ticket.proposal_version) as Array<{ message_id: string }>;
+    const current = db
+      .prepare("SELECT trigger_message_id FROM drafts WHERE ticket_id = ? AND proposal_version = ?")
+      .get(ticket.id, ticket.proposal_version) as { trigger_message_id: string | null } | undefined;
+    const proposalSource = current?.trigger_message_id
+      ? current.trigger_message_id
+      : ticket.proposal_version === 1
+        ? ticket.source_message_id
+        : null;
+    const sourceSeen = proposalSource != null && seen.has(proposalSource);
     const approvalsSeen = approvals.every((row) => seen.has(row.message_id));
     if (sourceSeen && approvalsSeen) continue;
     const next = ticket.proposal_version + 1;

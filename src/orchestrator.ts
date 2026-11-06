@@ -125,6 +125,10 @@ async function handleInThread(
     const orderId = orderIdFrom(payload.body);
     const ownerOk = !options.ownerId || payload.sender === options.ownerId;
     if (orderId && !parsed.ok && parsed.reason === "not_approval" && ownerOk) {
+      const bound = db.prepare("SELECT order_id FROM tickets WHERE id = ?").get(ticket.id) as { order_id: string | null };
+      if (bound.order_id && orderId !== bound.order_id) {
+        return `Order #${orderId} is not the order on this thread (#${bound.order_id}). Start a new root message for Order #${orderId}. Nothing was drafted or executed.`;
+      }
       return redraftTicket(db, ticket, payload, options, orderId);
     }
     return "This proposal was cleared because room history could not be verified after a gap. Repost the ticket text in this thread, for example: Order #4821 charged twice. A new root message also starts a fresh proposal. Nothing was drafted from the missing history, and nothing was executed.";
@@ -225,9 +229,9 @@ async function openTicket(db: DatabaseSync, frame: DomainMessage, options: Orche
     for (const id of citations.accepted) cite.run(draftId, id, 1);
     for (const id of citations.rejected) cite.run(draftId, id, 0);
     const proposal = db.prepare(
-      "INSERT INTO proposals (id, ticket_id, proposal_version, action, status) VALUES (?, ?, 1, ?, 'pending')",
+      "INSERT INTO proposals (id, ticket_id, proposal_version, action, status, order_id) VALUES (?, ?, 1, ?, 'pending', ?)",
     );
-    for (const action of assessment.proposedActions) proposal.run(randomUUID(), ticketId, action);
+    for (const action of assessment.proposedActions) proposal.run(randomUUID(), ticketId, action, order.id);
     if (citations.rejected.length > 0) {
       db.prepare("INSERT INTO audit_events (ticket_id, kind, payload_json, created_at) VALUES (?, 'citation_rejected', ?, ?)").run(
         ticketId,
@@ -321,9 +325,9 @@ async function redraftTicket(
     for (const id of citations.accepted) cite.run(draftId, id, 1);
     for (const id of citations.rejected) cite.run(draftId, id, 0);
     const proposal = db.prepare(
-      "INSERT INTO proposals (id, ticket_id, proposal_version, action, status) VALUES (?, ?, ?, ?, 'pending')",
+      "INSERT INTO proposals (id, ticket_id, proposal_version, action, status, order_id) VALUES (?, ?, ?, ?, 'pending', ?)",
     );
-    for (const action of assessment.proposedActions) proposal.run(randomUUID(), ticket.id, ticket.proposal_version, action);
+    for (const action of assessment.proposedActions) proposal.run(randomUUID(), ticket.id, ticket.proposal_version, action, order.id);
     db.prepare("INSERT INTO audit_events (ticket_id, kind, payload_json, created_at) VALUES (?, 'draft_stored', ?, ?)").run(
       ticket.id,
       JSON.stringify({ proposal_version: ticket.proposal_version, eligibility: assessment.eligibility, resent: true }),

@@ -25,7 +25,7 @@ type TicketRow = {
   proposal_version: number;
 };
 
-type ProposalRow = { id: string; action: Action; status: string };
+type ProposalRow = { id: string; action: Action; status: string; order_id: string | null };
 
 function now(): string {
   return new Date().toISOString();
@@ -43,7 +43,7 @@ export function executeApproval(db: DatabaseSync, approvalId: string, options?: 
     const names = JSON.parse(approval.actions_json) as Action[];
     const proposals = db
       .prepare(
-        `SELECT id, action, status FROM proposals
+        `SELECT id, action, status, order_id FROM proposals
          WHERE ticket_id = ? AND proposal_version = ?`,
       )
       .all(ticket.id, ticket.proposal_version) as ProposalRow[];
@@ -54,6 +54,8 @@ export function executeApproval(db: DatabaseSync, approvalId: string, options?: 
     for (const name of names) {
       const proposal = pending.get(name);
       if (!proposal) throw new Error("not_proposed");
+      if (proposal.order_id != null && proposal.order_id !== ticket.order_id) throw new Error("order_mismatch");
+      if (name === "issue_refund" && proposal.order_id !== ticket.order_id) throw new Error("order_mismatch");
       db.prepare(
         `INSERT INTO actions (id, ticket_id, proposal_id, approval_id, action, outcome, reason, simulated, created_at)
          VALUES (?, ?, ?, ?, ?, 'executed', ?, 1, ?)`,
