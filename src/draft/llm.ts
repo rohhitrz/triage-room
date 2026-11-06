@@ -15,14 +15,41 @@ export function assertRunnableMode(mode: string | undefined): void {
   if (mode && mode !== "live") throw new Error("LLM_MODE must be live.");
 }
 
-export function resolveChat(provider: string, model: string | undefined, baseUrl: string | undefined): { url: string; model: string } {
-  if (provider === "gemini") {
-    const url = baseUrl ?? "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
-    return { url, model: model || "gemini-2.5-flash" };
+export function optionalEnv(value: string | undefined | null): string | undefined {
+  if (value == null) return undefined;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+export function assertHttpUrl(value: string, name = "LLM_BASE_URL"): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new Error(`${name} is not a URL: ${value}`);
   }
-  const base = (baseUrl ?? "https://api.openai.com/v1").replace(/\/$/, "");
-  const url = base.endsWith("/chat/completions") ? base : `${base}/chat/completions`;
-  return { url, model: model || "gpt-4o-mini" };
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error(`${name} must be http or https: ${value}`);
+  }
+}
+
+export function resolveChat(provider: string, model: string | undefined, baseUrl: string | undefined): { url: string; model: string } {
+  const base = optionalEnv(baseUrl);
+  const chosen = optionalEnv(model);
+  if (base) assertHttpUrl(base);
+  if (provider === "gemini") {
+    const url = base ?? "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
+    return { url, model: chosen ?? "gemini-2.5-flash" };
+  }
+  const root = (base ?? "https://api.openai.com/v1").replace(/\/$/, "");
+  const url = root.endsWith("/chat/completions") ? root : `${root}/chat/completions`;
+  return { url, model: chosen ?? "gpt-4o-mini" };
+}
+
+export function validateLlmEnv(env: NodeJS.ProcessEnv): void {
+  const base = optionalEnv(env.LLM_BASE_URL);
+  if (base) assertHttpUrl(base);
+  resolveChat(optionalEnv(env.LLM_PROVIDER) ?? "openai", env.LLM_MODEL, base);
 }
 
 export function scriptedDraft(orderId: string): DraftOutput {

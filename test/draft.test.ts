@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { assertRunnableMode, liveDraft, parseDraft, resolveChat, scriptedDraft } from "../src/draft/llm.ts";
+import { assertRunnableMode, liveDraft, parseDraft, resolveChat, scriptedDraft, validateLlmEnv } from "../src/draft/llm.ts";
 import { handleDomainMessage, type OrchestratorOptions } from "../src/orchestrator.ts";
 import type { DomainMessage } from "../src/switch/protocol.ts";
 import { tempDb } from "./helpers.ts";
@@ -30,6 +30,18 @@ function message(body: string, extras: Partial<DomainMessage["data"]["payload"]>
 function options(draft: OrchestratorOptions["draft"]): OrchestratorOptions {
   return { ownerId: "owner-1", today: "2026-11-06", provider: "scripted", model: "fixture", draft };
 }
+
+test("an empty LLM_BASE_URL keeps the OpenAI and Gemini defaults", () => {
+  assert.equal(resolveChat("openai", undefined, "").url, "https://api.openai.com/v1/chat/completions");
+  assert.equal(resolveChat("openai", "  ", "   ").model, "gpt-4o-mini");
+  assert.equal(
+    resolveChat("gemini", undefined, "").url,
+    "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+  );
+  assert.equal(resolveChat("gemini", "", "").model, "gemini-2.5-flash");
+  assert.throws(() => validateLlmEnv({ LLM_BASE_URL: "not a url", LLM_PROVIDER: "openai" }), /not a URL/);
+  assert.doesNotThrow(() => validateLlmEnv({ LLM_BASE_URL: "", LLM_PROVIDER: "gemini" }));
+});
 
 test("npm start refuses scripted mode and the live client calls the configured model", async () => {
   assert.throws(() => assertRunnableMode("scripted"), /tests only/);

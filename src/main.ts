@@ -1,7 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { liveDraft } from "./draft/llm.ts";
-import { assertRunnableMode } from "./draft/llm.ts";
+import { assertRunnableMode, liveDraft, optionalEnv, validateLlmEnv } from "./draft/llm.ts";
 import { loadEnv } from "./env.ts";
 import { migrate } from "./db/migrate.ts";
 import { openDatabase } from "./db/open.ts";
@@ -14,6 +13,7 @@ import type { DomainMessage } from "./switch/protocol.ts";
 
 loadEnv();
 assertRunnableMode(process.env.LLM_MODE ?? "live");
+validateLlmEnv(process.env);
 if (!process.env.LLM_API_KEY) {
   console.error("Set LLM_API_KEY. npm start uses a live model and will not fall back to the scripted fixture.");
   process.exit(1);
@@ -78,14 +78,14 @@ async function pump(): Promise<void> {
       const text = await handleDomainMessage(db, frame, {
         ownerId: process.env.SWITCH_OWNER_PARTICIPANT_ID || null,
         today,
-        provider: process.env.LLM_PROVIDER ?? "openai",
-        model: process.env.LLM_MODEL || (process.env.LLM_PROVIDER === "gemini" ? "gemini-2.5-flash" : "gpt-4o-mini"),
+        provider: optionalEnv(process.env.LLM_PROVIDER) ?? "openai",
+        model: optionalEnv(process.env.LLM_MODEL) || (optionalEnv(process.env.LLM_PROVIDER) === "gemini" ? "gemini-2.5-flash" : "gpt-4o-mini"),
         draft: (input) =>
           liveDraft({
-            provider: process.env.LLM_PROVIDER ?? "openai",
+            provider: optionalEnv(process.env.LLM_PROVIDER) ?? "openai",
             apiKey: process.env.LLM_API_KEY ?? "",
-            model: process.env.LLM_MODEL,
-            baseUrl: process.env.LLM_BASE_URL,
+            model: optionalEnv(process.env.LLM_MODEL),
+            baseUrl: optionalEnv(process.env.LLM_BASE_URL),
             ...input,
           }),
       });
