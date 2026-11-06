@@ -21,6 +21,7 @@ export async function registerAgent(input: {
   bootstrapKey?: string;
   name?: string;
   fetchImpl?: typeof fetch;
+  persist?: (created: { id: string; api_key: string }) => void;
 }): Promise<{ id: string; api_key: string }> {
   assertRegistrationKey(input);
   const fetchImpl = input.fetchImpl ?? fetch;
@@ -31,6 +32,7 @@ export async function registerAgent(input: {
       Authorization: `Bearer ${input.registrationKey}`,
       "Content-Type": "application/json",
     },
+    signal: AbortSignal.timeout(20_000),
     body: JSON.stringify({
       name,
       description:
@@ -49,12 +51,14 @@ export async function registerAgent(input: {
     throw new Error(`POST /agents failed: ${response.status} ${await response.text()}`);
   }
   const created = (await response.json()) as { id: string; api_key: string };
+  input.persist?.(created);
   const addressing = await fetchImpl(`${input.baseUrl.replace(/\/$/, "")}/agents/${created.id}/ops/update_agent_detail`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${created.api_key}`,
       "Content-Type": "application/json",
     },
+    signal: AbortSignal.timeout(20_000),
     body: JSON.stringify({ agent_id: created.id, addressing: "owner_only" }),
   });
   if (!addressing.ok) {

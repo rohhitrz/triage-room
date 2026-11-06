@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { SwitchClient } from "../src/switch/client.ts";
+import { schemaMentionsThread } from "../src/switch/discover.ts";
 import { FakeSwitch } from "../src/switch/fake-server.ts";
 import { BootstrapKeyError, registerAgent } from "../src/switch/register.ts";
 import type { DomainMessage } from "../src/switch/protocol.ts";
@@ -174,6 +175,51 @@ test("reconnect resumes from gap.resumed_at after read_context is parsed", async
     client.stop();
     await fake.stop();
   }
+});
+
+test("registration saves the agent key before addressing can fail", async () => {
+  const fake = new FakeSwitch();
+  fake.failAddressing = true;
+  await fake.start();
+  const saved: Array<{ id: string; api_key: string }> = [];
+  try {
+    await assert.rejects(
+      () =>
+        registerAgent({
+          baseUrl: fake.baseUrl(),
+          registrationKey: fake.registrationKey,
+          persist: (created) => saved.push(created),
+        }),
+      /update_agent_detail/,
+    );
+    assert.equal(saved.length, 1);
+    assert.equal(saved[0]?.id, "agt_test");
+    assert.ok(saved[0]?.api_key);
+  } finally {
+    await fake.stop();
+  }
+});
+
+test("a closed eviction does not reconnect", async () => {
+  const fake = new FakeSwitch();
+  await fake.start();
+  const client = clientFor(fake, () => 0);
+  try {
+    await client.connect();
+    fake.send(fake.sockets[0], { type: "evicted", code: "closed", reason: "agent deleted" });
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    assert.equal(client.fatal, "closed");
+    assert.equal(fake.openUrls.length, 1);
+  } finally {
+    client.stop();
+    await fake.stop();
+  }
+});
+
+test("thread_id must be a schema field, not only a word in the description", () => {
+  assert.equal(schemaMentionsThread({ description: "posts use thread_id" }), false);
+  assert.equal(schemaMentionsThread({ properties: { thread_id: { type: "string" } } }), true);
+  assert.equal(schemaMentionsThread({ allOf: [{ required: ["thread_id"] }] }), true);
 });
 
 test("discovery records the server version and refuses a schema without thread_id", async () => {

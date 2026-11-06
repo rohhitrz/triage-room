@@ -25,6 +25,7 @@ export class SwitchClient {
   contextReads = 0;
   private socket: Socket | null = null;
   private stopped = false;
+  fatal: string | null = null;
   private ready = false;
   private connecting: Promise<void> | null = null;
   discovery: Discovery | null = null;
@@ -78,6 +79,7 @@ export class SwitchClient {
         content,
         thread_id: threadId,
       }),
+      signal: AbortSignal.timeout(20_000),
     });
     if (!response.ok) throw new Error(`post_message failed: ${response.status} ${await response.text()}`);
   }
@@ -169,12 +171,14 @@ export class SwitchClient {
       method: "POST",
       headers,
       body: JSON.stringify({ room_id: this.options.roomId, limit: 50 }),
+      signal: AbortSignal.timeout(20_000),
     });
     if (response.status === 400) {
       response = await fetchImpl(`${base}/agents/${this.options.agentId}/ops/read_context`, {
         method: "POST",
         headers,
         body: JSON.stringify({ room_id: this.options.roomId }),
+        signal: AbortSignal.timeout(20_000),
       });
     }
     if (!response.ok) throw new Error(`read_context failed: ${response.status} ${await response.text()}`);
@@ -192,8 +196,9 @@ export class SwitchClient {
     }
     if (kind === "evicted") {
       const code = String(frame.code ?? "");
-      if (code === "taken_over") {
+      if (code === "taken_over" || code === "closed") {
         this.stopped = true;
+        this.fatal = code;
         this.socket?.close();
         return;
       }

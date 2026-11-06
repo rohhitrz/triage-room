@@ -48,6 +48,7 @@ test("unsupported citations are rejected and the reply stays an unsent draft", (
   const split = splitCitations(["duplicate-charge", "made-up-policy", "window"], known);
   assert.deepEqual(split.accepted, ["duplicate-charge", "window"]);
   assert.deepEqual(split.rejected, ["made-up-policy"]);
+  assert.deepEqual(splitCitations(["nope", "nope"], known).rejected, ["nope"]);
   const post = composeDraftPost({
     assessment: assessOrder(order("4821"), DEMO_TODAY),
     customerReply: "We will look at the duplicate charge.",

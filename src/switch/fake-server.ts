@@ -17,6 +17,7 @@ export class FakeSwitch {
   omitThreadInSchema = false;
   rejectLimit = false;
   contextMessages: unknown[] = [];
+  failAddressing = false;
   private generation = 1;
 
   async start(): Promise<void> {
@@ -143,6 +144,11 @@ export class FakeSwitch {
         return;
       }
       if (ops[2] === "update_agent_detail") {
+        if (this.failAddressing) {
+          res.writeHead(500);
+          res.end("addressing failed");
+          return;
+        }
         const agent = this.agents.get(ops[1]);
         if (agent) agent.addressing = String(body.addressing ?? "");
         res.writeHead(200, { "Content-Type": "application/json" });

@@ -21,7 +21,21 @@ export function serverVersion(body: unknown): string | null {
 }
 
 export function schemaMentionsThread(schema: unknown): boolean {
-  return JSON.stringify(schema ?? {}).includes("thread_id");
+  if (!schema || typeof schema !== "object") return false;
+  const record = schema as {
+    properties?: Record<string, unknown>;
+    required?: unknown;
+    allOf?: unknown;
+    anyOf?: unknown;
+    oneOf?: unknown;
+  };
+  if (record.properties && Object.prototype.hasOwnProperty.call(record.properties, "thread_id")) return true;
+  if (Array.isArray(record.required) && record.required.includes("thread_id")) return true;
+  for (const key of ["allOf", "anyOf", "oneOf"] as const) {
+    const list = record[key];
+    if (Array.isArray(list) && list.some((item) => schemaMentionsThread(item))) return true;
+  }
+  return false;
 }
 
 export async function discoverSwitch(input: {
@@ -35,12 +49,13 @@ export async function discoverSwitch(input: {
 }): Promise<Discovery> {
   const fetchImpl = input.fetchImpl ?? fetch;
   const base = input.baseUrl.replace(/\/$/, "");
-  const health = await fetchImpl(`${base}/health`);
+  const health = await fetchImpl(`${base}/health`, { signal: AbortSignal.timeout(20_000) });
   const healthBody = await health.json().catch(() => ({}));
   let postSchema: unknown = null;
   if (input.agentId && input.agentKey) {
     const ops = await fetchImpl(`${base}/agents/${input.agentId}/ops`, {
       headers: { Authorization: `Bearer ${input.agentKey}` },
+      signal: AbortSignal.timeout(20_000),
     });
     if (!ops.ok) throw new Error(`GET /ops failed: ${ops.status} ${await ops.text()}`);
     const body = (await ops.json()) as { operations?: Record<string, { input_schema?: unknown }> };

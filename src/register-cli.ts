@@ -16,14 +16,16 @@ const created = await registerAgent({
   registrationKey,
   keyKind: process.env.SWITCH_KEY_KIND,
   bootstrapKey: process.env.SWITCH_BOOTSTRAP_KEY,
+  persist(agent) {
+    mkdirSync("data", { recursive: true });
+    const record = {
+      id: agent.id,
+      api_key: agent.api_key,
+      connection_id: process.env.SWITCH_CONNECTION_ID || randomUUID(),
+    };
+    writeFileSync("data/agent.json", `${JSON.stringify(record, null, 2)}\n`);
+  },
 });
-mkdirSync("data", { recursive: true });
-const record = {
-  id: created.id,
-  api_key: created.api_key,
-  connection_id: process.env.SWITCH_CONNECTION_ID || randomUUID(),
-};
-writeFileSync("data/agent.json", `${JSON.stringify(record, null, 2)}\n`);
 console.log(`registered ${created.id}`);
 console.log("saved data/agent.json (gitignored)");
 console.log("addressing set to owner_only");

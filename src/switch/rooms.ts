@@ -7,6 +7,7 @@ export async function listRooms(input: { baseUrl: string; agentId: string; apiKe
       "Content-Type": "application/json",
     },
     body: "{}",
+    signal: AbortSignal.timeout(20_000),
   });
   const text = await response.text();
   if (!response.ok) throw new Error(`list_rooms failed: ${response.status} ${text}`);

@@ -71,7 +71,7 @@ export function splitCitations(cited: string[], known: string[]): { accepted: st
   const rejected: string[] = [];
   for (const id of cited) {
     if (allowed.has(id) && !accepted.includes(id)) accepted.push(id);
-    else if (!allowed.has(id)) rejected.push(id);
+    else if (!allowed.has(id) && !rejected.includes(id)) rejected.push(id);
   }
   return { accepted, rejected };
 }
