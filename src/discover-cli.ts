@@ -1,5 +1,8 @@
 import { readFileSync, existsSync } from "node:fs";
+import { loadEnv } from "./env.ts";
 import { discoverSwitch } from "./switch/discover.ts";
+
+loadEnv();
 
 const baseUrl = process.env.SWITCH_BASE_URL ?? "";
 if (!baseUrl) {

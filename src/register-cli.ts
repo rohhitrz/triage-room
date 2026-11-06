@@ -1,6 +1,9 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
+import { loadEnv } from "./env.ts";
 import { registerAgent } from "./switch/register.ts";
+
+loadEnv();
 
 const baseUrl = process.env.SWITCH_BASE_URL ?? "";
 const registrationKey = process.env.SWITCH_REGISTRATION_KEY ?? "";
