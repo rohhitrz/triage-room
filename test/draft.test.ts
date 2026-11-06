@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { assertRunnableMode, liveDraft, parseDraft, resolveChat, scriptedDraft, validateLlmEnv } from "../src/draft/llm.ts";
+import { assertRunnableMode, chatBody, liveDraft, parseDraft, resolveChat, scriptedDraft, validateLlmEnv } from "../src/draft/llm.ts";
 import { handleDomainMessage, type OrchestratorOptions } from "../src/orchestrator.ts";
 import type { DomainMessage } from "../src/switch/protocol.ts";
 import { tempDb } from "./helpers.ts";
@@ -59,6 +59,7 @@ test("npm start refuses scripted mode and the live client calls the configured m
     assert.equal(String(url), openai.url);
     const body = JSON.parse(String(init?.body));
     assert.equal(body.temperature, 0);
+    assert.deepEqual(body.response_format, { type: "json_object" });
     assert.match(body.messages[1].content, /Duplicate charge/);
     assert.match(body.messages[1].content, /Refund window/);
     assert.match(body.messages[1].content, /Parcel not received/);
@@ -191,4 +192,13 @@ test("the filmed sequence blocks a negation, then executes only the authorized s
   } finally {
     close();
   }
+});
+
+test("reasoning models get no temperature, and only OpenAI gets JSON mode", () => {
+  const prompt = { system: "Return one JSON object.", user: "Ticket" };
+  assert.equal(chatBody("openai", "gpt-4o-mini", prompt).temperature, 0);
+  assert.equal("temperature" in chatBody("openai", "gpt-5-mini", prompt), false);
+  assert.equal("temperature" in chatBody("openai", "o4-mini", prompt), false);
+  assert.deepEqual(chatBody("openai", "gpt-5-mini", prompt).response_format, { type: "json_object" });
+  assert.equal("response_format" in chatBody("gemini", "gemini-2.5-flash", prompt), false);
 });

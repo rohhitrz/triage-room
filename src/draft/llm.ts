@@ -60,6 +60,24 @@ export function scriptedDraft(orderId: string): DraftOutput {
   };
 }
 
+// OpenAI reasoning models (o-series, gpt-5 family) reject a temperature other than the default.
+export function acceptsTemperature(model: string): boolean {
+  return !/^(o\d|gpt-5)/i.test(model.trim());
+}
+
+export function chatBody(provider: string, model: string, prompt: { system: string; user: string }): Record<string, unknown> {
+  return {
+    model,
+    ...(acceptsTemperature(model) ? { temperature: 0 } : {}),
+    // JSON mode makes the model return a parseable object instead of prose or fenced code.
+    ...(provider === "openai" ? { response_format: { type: "json_object" } } : {}),
+    messages: [
+      { role: "system", content: prompt.system },
+      { role: "user", content: prompt.user },
+    ],
+  };
+}
+
 export async function liveDraft(input: {
   provider: string;
   apiKey: string;
@@ -86,14 +104,7 @@ export async function liveDraft(input: {
       Authorization: `Bearer ${input.apiKey}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      model: target.model,
-      temperature: 0,
-      messages: [
-        { role: "system", content: prompt.system },
-        { role: "user", content: prompt.user },
-      ],
-    }),
+    body: JSON.stringify(chatBody(input.provider, target.model, prompt)),
     signal: AbortSignal.timeout(20_000),
   });
   if (!response.ok) throw new Error(`model request failed: ${response.status} ${await response.text()}`);
