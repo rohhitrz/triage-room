@@ -1,0 +1,20 @@
+{
+  "name": "refund-desk",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "start": "node --experimental-strip-types --disable-warning=ExperimentalWarning src/main.ts",
+    "register": "node --experimental-strip-types --disable-warning=ExperimentalWarning src/register-cli.ts",
+    "discover": "node --experimental-strip-types --disable-warning=ExperimentalWarning src/discover-cli.ts",
+    "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning --test test/*.test.ts",
+    "db:migrate": "node --experimental-strip-types --disable-warning=ExperimentalWarning src/db/migrate-cli.ts",
+    "db:seed": "node --experimental-strip-types --disable-warning=ExperimentalWarning src/db/seed-cli.ts"
+  },
+  "dependencies": {
+    "ws": "^8.18.3"
+  }
+}
