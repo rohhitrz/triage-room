@@ -55,7 +55,7 @@ Order `#4821` is a duplicate charge inside the 30-day window. Code proposes `sen
 - A bare `Approved` binds the exact pending set at the current version.
 - Wrong thread, null thread, or a sender who is not the configured owner does not approve.
 - After the draft changes, the old approval does not execute.
-- A crash after the event is queued still leads to one execution. A duplicate delivery does not create a second one. A gap does not move the sequence checkpoint.
+- A crash after the event is queued still leads to one execution. A duplicate delivery does not create a second one. A gap keeps the receipt cursor and sets the stream cursor to `resumed_at`.
 - An unknown citation id is rejected and is not shown as policy.
 
 ## Success metrics

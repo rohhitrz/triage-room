@@ -59,7 +59,7 @@ Write `data/switch-discovery.json`:
 
 `server_version` is taken from the health body when a version field is present (`version`, `server_version`, or `switch_version`). `console_version` is `SWITCH_CONSOLE_VERSION` from the environment, because Console does not report itself on the bridge. Rohit copies both into the smoke notes. This environment cannot fill them in.
 
-`docs/switch-ops.expected.json` is the argument object this client sends. The live `post_message.input_schema` must mention `thread_id` (in `properties` or in the raw schema text). If it does not, the process exits. It does not call `POST /agents/{id}/message`.
+`docs/switch-ops.expected.json` is the argument object this client sends. The live `post_message.input_schema` must include `thread_id` on `properties` or `required` (including inside `allOf` / `anyOf` / `oneOf`). A description that merely contains the words is not enough. If the field is absent, the process exits. It does not call `POST /agents/{id}/message`.
 
 ## WebSocket
 
@@ -67,14 +67,14 @@ Write `data/switch-discovery.json`:
 
 Resume adds `expected_generation`.
 
-| Frame | Effect on checkpoint | Work |
+| Frame | Effect on cursors | Work |
 | --- | --- | --- |
-| `connection_state` | None | Store `generation`. Then `read_context`. |
-| `ping` | None | Pong the committed checkpoint. |
-| Domain event with numeric `id` | Advance to that id after the inbox insert commits | Worker runs after the ack point. |
-| `gap` | None | `read_context`. |
+| `connection_state` | None | Store `generation`. Then `read_context`, and parse the messages. |
+| `ping` | None | Pong `resume_sequence`. |
+| Domain event with numeric `id` | Receipt and resume move to that id after the inbox insert commits, inside the current cursor epoch | Worker runs after the ack point. |
+| `gap` | Receipt stays. Resume becomes `resumed_at`. Cursor epoch increments. | Parse `read_context`. If history cannot show the source message and live approvals, invalidate the proposal. |
 | `evicted` `taken_over` | None | Exit. |
-| `evicted` recoverable | None | Reconnect from the checkpoint. |
+| `evicted` recoverable | None | Reconnect from `resume_sequence`. |
 
 `read_context` and `post_message` are `POST /agents/{id}/ops/{name}` with the agent key, the connection header, and an unwrapped body.
 

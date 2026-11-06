@@ -16,6 +16,7 @@ export class FakeSwitch {
   registrationKey = "reg_test";
   omitThreadInSchema = false;
   rejectLimit = false;
+  contextMessages: unknown[] = [];
   private generation = 1;
 
   async start(): Promise<void> {
@@ -156,7 +157,7 @@ export class FakeSwitch {
         }
         this.contextCalls.push({ body, connectionId });
         res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ result: { messages: [] } }));
+        res.end(JSON.stringify({ result: { messages: this.contextMessages } }));
         return;
       }
       if (ops[2] === "post_message") {

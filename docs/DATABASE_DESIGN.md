@@ -75,7 +75,7 @@ Unique on `proposal_id` where `outcome='executed'`. Denied attempts are audit ro
 | Column | Notes |
 | --- | --- |
 | `id` INTEGER PK | |
-| `sequence` INTEGER | Null for a gap record. Unique when not null. |
+| `sequence` INTEGER | Null for a gap record. Unique together with `cursor_epoch`, not across a numbering reset. |
 | `message_id` TEXT | Unique when not null. |
 | `kind` TEXT | `message` or `gap`. |
 | `payload_json` TEXT | |
@@ -87,7 +87,7 @@ Inserting a row does not mean the work finished. Skip a duplicate only when `sta
 
 ### `checkpoint`
 
-One row, `id=1`. `queued_sequence` INTEGER. `generation` TEXT. Updated in the same transaction as a numbered inbox insert. Gap rows do not change `queued_sequence`.
+One row, `id=1`. `queued_sequence` is the last domain sequence durably received. `resume_sequence` is the socket cursor: the last received sequence, or `gap.resumed_at` after a gap. `cursor_epoch` increments on each gap. A gap does not change `queued_sequence`.
 
 ### `audit_events`
 

@@ -45,8 +45,8 @@ sequenceDiagram
 3. `POST /agents/{id}/ops/update_agent_detail` with `addressing: owner_only`.
 4. Open `/agents/{id}/connection/ws` with a stable `connection_id`, `scope=single`, `filter=all`, and `rooms={SWITCH_ROOM_ID}` so the room is claimed as the socket opens.
 5. Read `generation` from `connection_state`. Then call `read_context` with `X-Switch-Connection-Id` to load context. Do not wait until a later subscribe.
-6. On every `ping`, reply `{"type":"pong","cursor":<queued_sequence>}` immediately. The cursor is the checkpoint, not an in-memory guess. A test drives 150 pings, the count in a 5-minute session at the documented 2-second interval.
-7. Reconnect with the same `connection_id`, `start_from` set to the checkpoint, and `expected_generation`. Stop on `taken_over`.
+6. On every `ping`, reply `{"type":"pong","cursor":<resume_sequence>}` immediately. That cursor is the stream position, committed before the pong. A test drives 150 pings, the count in a 5-minute session at the documented 2-second interval.
+7. Reconnect with the same `connection_id`, `start_from` set to `resume_sequence`, and `expected_generation`. Stop on `taken_over`.
 8. Post with `post_message` and a non-null `thread_id`. If the live input schema has no thread field, exit and print the schema. There is no `POST /agents/{id}/message` fallback and no channel-root post.
 
 `docs/switch-ops.expected.json` is the shape this client sends. A real Console may differ. Discovery is what Rohit records during the smoke test. This VM cannot see his Console version.
@@ -57,11 +57,11 @@ Room instructions live in `room/instructions.md`. Paste them before the first ti
 
 Domain events carry a numeric `id`. Control frames do not.
 
-- A numbered event is inserted into `inbox` as `queued` in the same transaction that advances `checkpoint.queued_sequence`. The pong cursor moves only after that commit. Pings that arrive mid-insert still report the old checkpoint.
-- Existence of a row is not completion. A duplicate is ignored only when `state=completed`. `queued`, `processing`, or `failed` is resumed.
-- On startup, rows left in `processing` return to `queued`.
-- `gap`, `ping`, `connection_state`, and `evicted` do not advance the checkpoint. On `gap`, call `read_context` and keep the old cursor.
-- The worker claims one queued row, does the work, then marks it `completed`.
+- A numbered event is inserted into `inbox` as `queued` in the same transaction that advances `checkpoint.queued_sequence` (what we actually received) and `resume_sequence` (what the socket reports). The pong uses `resume_sequence` only after that commit.
+- Existence of a row is not completion. A duplicate message id is ignored only when `state=completed`. The same sequence number in a later cursor epoch is a different event.
+- On startup, rows left in `processing` return to `queued`. A failed send is requeued until five attempts, then marked failed.
+- A `gap` does not change `queued_sequence`. Per the [connection docs](https://docs.switchagents.ai/switch-rooms/internals/agent-connection.md), `resume_sequence` becomes `resumed_at`, and the cursor epoch increments so a numbering reset cannot collide with an old sequence. `read_context` is parsed. If the source message or a live approval is missing from that history, the proposal version increments, older approvals are invalidated, and execution waits for a new proposal.
+- The worker claims one queued row, does the work, then marks it `completed` only after the outbound post is sent.
 
 ## Decisions
 

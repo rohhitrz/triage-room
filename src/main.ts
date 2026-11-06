@@ -7,7 +7,8 @@ import { openDatabase } from "./db/open.ts";
 import { seed, DEMO_TODAY } from "./db/seed.ts";
 import { startLedger } from "./http/ledger.ts";
 import { deliverQueued } from "./ledger/deliver.ts";
-import { checkpoint, claimNext, enqueueGap, enqueueMessage, reclaimProcessing, scheduleDeliveryRetry } from "./ledger/inbox.ts";
+import { reconcileAfterGap } from "./ledger/gap.ts";
+import { claimNext, enqueueGap, enqueueMessage, reclaimProcessing, resumeSequence, scheduleDeliveryRetry } from "./ledger/inbox.ts";
 import { SwitchClient } from "./switch/client.ts";
 
 loadEnv();
@@ -39,15 +40,16 @@ const client = new SwitchClient({
   apiKey: saved.api_key,
   connectionId: saved.connection_id,
   roomId: process.env.SWITCH_ROOM_ID,
-  getCursor: () => checkpoint(db),
+  getCursor: () => resumeSequence(db),
   reconnectDelayMs: 1000,
   onDomainEvent: async (frame) => {
     const payload = frame.data.payload;
     if (payload.addressed) console.log(`addressed sender_id=${payload.sender} sender_name=${payload.sender_name ?? ""}`);
     enqueueMessage(db, frame);
   },
-  onGap: async (frame) => {
+  onGap: async (frame, messages) => {
     enqueueGap(db, frame);
+    reconcileAfterGap(db, messages);
   },
 });
 

@@ -1,6 +1,6 @@
 import WebSocket from "ws";
 import { discoverSwitch, schemaMentionsThread, type Discovery } from "./discover.ts";
-import { frameKind, isDomainMessage, type DomainMessage, type GapFrame } from "./protocol.ts";
+import { frameKind, isDomainMessage, parseContextMessages, type ContextMessage, type DomainMessage, type GapFrame } from "./protocol.ts";
 
 export type SwitchClientOptions = {
   baseUrl: string;
@@ -10,7 +10,7 @@ export type SwitchClientOptions = {
   roomId: string;
   getCursor: () => number;
   onDomainEvent: (frame: DomainMessage) => Promise<void>;
-  onGap: (frame: GapFrame) => Promise<void>;
+  onGap: (frame: GapFrame, messages: ContextMessage[]) => Promise<void>;
   fetchImpl?: typeof fetch;
   reconnect?: boolean;
   reconnectDelayMs?: number;
@@ -157,7 +157,7 @@ export class SwitchClient {
     }, delay);
   }
 
-  private async readContext(): Promise<void> {
+  private async readContext(): Promise<ContextMessage[]> {
     const fetchImpl = this.options.fetchImpl ?? fetch;
     const base = this.options.baseUrl.replace(/\/$/, "");
     const headers = {
@@ -178,14 +178,16 @@ export class SwitchClient {
       });
     }
     if (!response.ok) throw new Error(`read_context failed: ${response.status} ${await response.text()}`);
+    const messages = parseContextMessages(await response.json().catch(() => ({})));
     this.contextReads += 1;
+    return messages;
   }
 
   private async dispatch(frame: Record<string, unknown>): Promise<void> {
     const kind = frameKind(frame);
     if (kind === "gap") {
-      await this.readContext();
-      await this.options.onGap(frame as GapFrame);
+      const messages = await this.readContext();
+      await this.options.onGap(frame as GapFrame, messages);
       return;
     }
     if (kind === "evicted") {

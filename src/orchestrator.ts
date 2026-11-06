@@ -34,6 +34,7 @@ type TicketRow = {
   thread_id: string;
   proposal_version: number;
   source_message_id: string;
+  needs_refresh: number;
 };
 
 function now(): string {
@@ -88,11 +89,11 @@ export async function handleDomainMessage(db: DatabaseSync, frame: DomainMessage
 
 function findTicket(db: DatabaseSync, payload: DomainMessage["data"]["payload"]): TicketRow | undefined {
   if (payload.thread_id) {
-    return db.prepare("SELECT id, thread_id, proposal_version, source_message_id FROM tickets WHERE thread_id = ?").get(payload.thread_id) as
+    return db.prepare("SELECT id, thread_id, proposal_version, source_message_id, needs_refresh FROM tickets WHERE thread_id = ?").get(payload.thread_id) as
       | TicketRow
       | undefined;
   }
-  return db.prepare("SELECT id, thread_id, proposal_version, source_message_id FROM tickets WHERE source_message_id = ?").get(payload.message_id) as
+  return db.prepare("SELECT id, thread_id, proposal_version, source_message_id, needs_refresh FROM tickets WHERE source_message_id = ?").get(payload.message_id) as
     | TicketRow
     | undefined;
 }
@@ -103,6 +104,9 @@ async function handleInThread(
   payload: DomainMessage["data"]["payload"],
   options: OrchestratorOptions,
 ): Promise<string> {
+  if (ticket.needs_refresh) {
+    return "This proposal was cleared because room history could not be verified after a gap. Send the ticket again.";
+  }
   const pending = (
     db
       .prepare(

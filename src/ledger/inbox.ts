@@ -20,20 +20,33 @@ export function checkpoint(db: DatabaseSync): number {
   return row.n;
 }
 
+export function resumeSequence(db: DatabaseSync): number {
+  const row = db.prepare("SELECT resume_sequence AS n FROM checkpoint WHERE id = 1").get() as { n: number };
+  return row.n;
+}
+
+export function cursorEpoch(db: DatabaseSync): number {
+  const row = db.prepare("SELECT cursor_epoch AS n FROM checkpoint WHERE id = 1").get() as { n: number };
+  return row.n;
+}
+
 export function enqueueMessage(db: DatabaseSync, frame: DomainMessage): "queued" | "resume" | "completed" {
   const sequence = frame.id;
   const messageId = frame.data.payload.message_id;
-  const existing = db
-    .prepare("SELECT state FROM inbox WHERE sequence = ? OR message_id = ?")
-    .get(sequence, messageId) as { state: string } | undefined;
-  if (existing) return existing.state === "completed" ? "completed" : "resume";
+  const epoch = cursorEpoch(db);
+  const byMessage = db.prepare("SELECT state FROM inbox WHERE message_id = ?").get(messageId) as { state: string } | undefined;
+  if (byMessage) return byMessage.state === "completed" ? "completed" : "resume";
+  const bySequence = db.prepare("SELECT state FROM inbox WHERE sequence = ? AND cursor_epoch = ?").get(sequence, epoch) as
+    | { state: string }
+    | undefined;
+  if (bySequence) return bySequence.state === "completed" ? "completed" : "resume";
   db.exec("BEGIN IMMEDIATE");
   try {
     db.prepare(
-      `INSERT INTO inbox (sequence, message_id, kind, payload_json, state, attempts, queued_at)
-       VALUES (?, ?, 'message', ?, 'queued', 0, ?)`,
-    ).run(sequence, messageId, JSON.stringify(frame), now());
-    db.prepare("UPDATE checkpoint SET queued_sequence = ? WHERE id = 1 AND queued_sequence < ?").run(sequence, sequence);
+      `INSERT INTO inbox (sequence, message_id, kind, payload_json, state, attempts, queued_at, cursor_epoch)
+       VALUES (?, ?, 'message', ?, 'queued', 0, ?, ?)`,
+    ).run(sequence, messageId, JSON.stringify(frame), now(), epoch);
+    db.prepare("UPDATE checkpoint SET queued_sequence = ?, resume_sequence = ? WHERE id = 1").run(sequence, sequence);
     db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");
@@ -43,16 +56,18 @@ export function enqueueMessage(db: DatabaseSync, frame: DomainMessage): "queued"
 }
 
 export function enqueueGap(db: DatabaseSync, frame: GapFrame): void {
-  const before = checkpoint(db);
+  if (typeof frame.resumed_at !== "number") throw new Error("gap missing resumed_at");
+  const receipt = checkpoint(db);
   db.prepare(
     `INSERT INTO inbox (kind, payload_json, state, attempts, queued_at)
      VALUES ('gap', ?, 'completed', 0, ?)`,
   ).run(JSON.stringify(frame), now());
+  db.prepare("UPDATE checkpoint SET resume_sequence = ?, cursor_epoch = cursor_epoch + 1 WHERE id = 1").run(frame.resumed_at);
   db.prepare("INSERT INTO audit_events (ticket_id, kind, payload_json, created_at) VALUES (NULL, 'gap', ?, ?)").run(
     JSON.stringify(frame),
     now(),
   );
-  if (checkpoint(db) !== before) throw new Error("gap moved the checkpoint");
+  if (checkpoint(db) !== receipt) throw new Error("gap moved the receipt cursor");
 }
 
 export function reclaimProcessing(db: DatabaseSync): void {

@@ -142,14 +142,18 @@ test("acks a domain sequence only after the event handler finishes", async () =>
   }
 });
 
-test("reconnect sends the checkpoint and generation, and a gap does not move the cursor", async () => {
+test("reconnect resumes from gap.resumed_at after read_context is parsed", async () => {
   const fake = new FakeSwitch();
+  fake.contextMessages = [{ message_id: "src_1", body: "Order #4821", thread_id: "thr", sender: "owner-1" }];
   await fake.start();
   let cursor = 7;
   let gaps = 0;
+  let parsed = 0;
   const client = clientFor(fake, () => cursor, {
-    onGap: async () => {
+    onGap: async (frame, messages) => {
       gaps += 1;
+      parsed = messages.length;
+      cursor = typeof frame.resumed_at === "number" ? frame.resumed_at : cursor;
     },
   });
   try {
@@ -157,12 +161,13 @@ test("reconnect sends the checkpoint and generation, and a gap does not move the
     const firstGen = client.generation;
     fake.send(fake.sockets[0], { type: "gap", from_sequence: 1, resumed_at: 99, reason: "retention" });
     await waitFor(() => gaps === 1);
-    assert.equal(cursor, 7);
+    assert.equal(parsed, 1);
+    assert.equal(cursor, 99);
     assert.equal(client.contextReads, 2);
     fake.sockets[0].close();
     await waitFor(() => fake.openUrls.length >= 2);
     const again = new URL(fake.openUrls[1], "http://127.0.0.1");
-    assert.equal(again.searchParams.get("start_from"), "7");
+    assert.equal(again.searchParams.get("start_from"), "99");
     assert.equal(again.searchParams.get("expected_generation"), String(firstGen));
     assert.equal(again.searchParams.get("rooms"), "room_1");
   } finally {

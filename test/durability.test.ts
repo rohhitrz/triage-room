@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { DatabaseSync } from "node:sqlite";
 import { executeApproval, composeLedgerPost, SIMULATED_REASON } from "../src/ledger/execute.ts";
-import { checkpoint, claimNext, enqueueGap, enqueueMessage, markCompleted, reclaimProcessing } from "../src/ledger/inbox.ts";
+import { checkpoint, claimNext, cursorEpoch, enqueueGap, enqueueMessage, markCompleted, reclaimProcessing, resumeSequence } from "../src/ledger/inbox.ts";
 import type { DomainMessage } from "../src/switch/protocol.ts";
 import { tempDb } from "./helpers.ts";
 
@@ -70,16 +70,18 @@ test("a crash after queue resumes once and a duplicate does not execute twice", 
   }
 });
 
-test("a gap and a disconnect do not advance the checkpoint or finish the queued work", () => {
+test("a gap sets the stream cursor to resumed_at and keeps the receipt cursor", () => {
   const { db, close } = tempDb();
   try {
     enqueueMessage(db, frame(3));
     enqueueGap(db, { type: "gap", from_sequence: 1, resumed_at: 99, reason: "retention" });
     assert.equal(checkpoint(db), 3);
-    const queued = db.prepare("SELECT state FROM inbox WHERE sequence = 3").get() as { state: string };
+    assert.equal(resumeSequence(db), 99);
+    assert.equal(cursorEpoch(db), 2);
+    const queued = db.prepare("SELECT state FROM inbox WHERE sequence = 3 AND cursor_epoch = 1").get() as { state: string };
     assert.equal(queued.state, "queued");
-    const gapAudit = db.prepare("SELECT COUNT(*) AS n FROM audit_events WHERE kind = 'gap'").get() as { n: number };
-    assert.equal(gapAudit.n, 1);
+    assert.equal(enqueueMessage(db, frame(3, "m-reset")), "queued");
+    assert.equal((db.prepare("SELECT COUNT(*) AS n FROM inbox WHERE kind = 'message'").get() as { n: number }).n, 2);
   } finally {
     close();
   }
