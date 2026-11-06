@@ -62,8 +62,13 @@ export function executeApproval(db: DatabaseSync, approvalId: string, options?: 
       if (name === "flag_finance") {
         db.prepare("UPDATE tickets SET finance_note = ? WHERE id = ?").run(SIMULATED_REASON.flag_finance, ticket.id);
       }
-      if (name === "issue_refund" && ticket.order_id) {
-        db.prepare("UPDATE orders SET status = 'refund_recorded' WHERE id = ?").run(ticket.order_id);
+      if (name === "issue_refund") {
+        if (!ticket.order_id) throw new Error("refund_already_recorded");
+        const updated = db.prepare("UPDATE orders SET status = 'refund_recorded' WHERE id = ? AND status = 'paid'").run(ticket.order_id) as {
+          changes: number;
+        };
+        if (Number(updated.changes) !== 1) throw new Error("refund_already_recorded");
+        db.prepare("INSERT INTO order_refunds (order_id, ticket_id, created_at) VALUES (?, ?, ?)").run(ticket.order_id, ticket.id, now());
       }
       db.prepare("INSERT INTO audit_events (ticket_id, kind, payload_json, created_at) VALUES (?, 'action_executed', ?, ?)").run(
         ticket.id,

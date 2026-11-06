@@ -29,6 +29,15 @@ export function assessOrder(order: OrderRow, today: string): Assessment {
   const age = daysBetween(order.placed_on, today);
   const inWindow = age >= 0 && age <= 30;
   const duplicate = order.charge_count >= 2;
+  if (order.status === "refund_recorded") {
+    return {
+      label: "refund",
+      eligibility: "ineligible",
+      proposedActions: ["send_reply"],
+      usedClauseIds: ["duplicate-charge", "window"],
+      summary: `Order #${order.id} already has one refund record. A second refund is not proposed.`,
+    };
+  }
   if (duplicate && inWindow) {
     return {
       label: "refund",
