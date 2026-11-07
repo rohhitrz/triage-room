@@ -4,6 +4,7 @@ A Switch room where a support agent and a human finish a duplicate-charge ticket
 
 **Author:** Rohit Raj ([rohhitrz](https://github.com/rohhitrz)), solo.
 **Track:** [Best Business Workflow](https://www.wemakedevs.org/hackathons/switch). Deadline 7 Nov 2026, 11:59 PM IST.
+**Demo video (2 min):** https://youtu.be/v_CuUYktW4g
 
 Without Switch there is no room, no thread, and nothing for the approval to bind to. The loopback page only reads the ledger.
 
@@ -19,7 +20,7 @@ Design notes: [docs/SYSTEM_DESIGN.md](docs/SYSTEM_DESIGN.md), [docs/API_DESIGN.m
 
 ## Run it on your machine
 
-This repo was built against the documented protocol and a fake Switch server. Console and Mattermost have to run on your computer. Budget about 30 minutes after Docker is installed. Prefer macOS. Windows and Linux Console builds are early access.
+Tested live on Switch Console 0.40.1 (switch-core 0.31.0, agent protocol 9) with the bundled Mattermost and `gpt-4o-mini`. The test suite runs against a fake Switch server shaped like that release. Console and Mattermost have to run on your computer. Budget about 30 minutes after Docker is installed. Prefer macOS. Windows and Linux Console builds are early access.
 
 ### 1. Install Switch
 
@@ -141,7 +142,7 @@ Covers the seed, registration refusal, a 150-ping heartbeat, in-thread post, ack
 | Track | Best Business Workflow |
 | Team | Solo — Rohit Raj (rohhitrz) |
 | Repo | https://github.com/rohhitrz/triage-room |
-| Demo video | TODO |
+| Demo video | https://youtu.be/v_CuUYktW4g |
 | Live link | Not required. Ledger is local. |
 | Blog / Wispr | Skip unless you actually publish or dictate. |
 
