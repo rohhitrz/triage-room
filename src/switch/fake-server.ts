@@ -19,6 +19,8 @@ export class FakeSwitch {
   contextMessages: unknown[] = [];
   holdContext: Promise<void> | null = null;
   failAddressing = false;
+  refuseAddressing = false;
+  connectedRoom = "";
   private generation = 1;
 
   async start(): Promise<void> {
@@ -107,16 +109,17 @@ export class FakeSwitch {
     }
     const ops = url.pathname.match(/^\/agents\/([^/]+)\/ops(?:\/([^/]+))?$/);
     if (ops && req.method === "GET" && !ops[2]) {
+      // Shaped like switch-core 0.31's post_message: `body`, an optional
+      // `thread_id`, and no room (the session's connected room is used).
       const thread = this.omitThreadInSchema
-        ? { type: "object", properties: { room_id: { type: "string" }, content: { type: "string" } }, required: ["room_id", "content"] }
+        ? { type: "object", properties: { body: { type: "string" } }, required: ["body"] }
         : {
             type: "object",
             properties: {
-              room_id: { type: "string" },
-              content: { type: "string" },
-              thread_id: { type: "string" },
+              body: { type: "string" },
+              thread_id: { anyOf: [{ type: "string" }, { type: "null" }], default: null },
             },
-            required: ["room_id", "content", "thread_id"],
+            required: ["body"],
           };
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(
@@ -150,6 +153,11 @@ export class FakeSwitch {
           res.end("addressing failed");
           return;
         }
+        if (this.refuseAddressing) {
+          res.writeHead(403, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ detail: "An agent can't change its own settings, permissions or services." }));
+          return;
+        }
         const agent = this.agents.get(ops[1]);
         if (agent) agent.addressing = String(body.addressing ?? "");
         res.writeHead(200, { "Content-Type": "application/json" });
@@ -168,13 +176,29 @@ export class FakeSwitch {
         res.end(JSON.stringify({ result: { messages: this.contextMessages } }));
         return;
       }
+      if (ops[2] === "connect_to_room") {
+        this.connectedRoom = String(body.room_id ?? "");
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ result: { room_id: this.connectedRoom, instructions: "" } }));
+        return;
+      }
       if (ops[2] === "post_message") {
+        if (!this.connectedRoom) {
+          res.writeHead(409, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ detail: "not connected to a room; call connect_to_room" }));
+          return;
+        }
+        if (typeof body.body !== "string" || Object.hasOwn(body, "content") || Object.hasOwn(body, "room_id")) {
+          res.writeHead(422);
+          res.end("post_message takes body and thread_id");
+          return;
+        }
         if (!body.thread_id) {
           res.writeHead(400);
           res.end("thread_id required");
           return;
         }
-        this.posts.push({ path: url.pathname, body, connectionId });
+        this.posts.push({ path: url.pathname, body: { ...body, room_id: this.connectedRoom }, connectionId });
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ result: { message_id: "msg_posted" } }));
         return;

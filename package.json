@@ -13,7 +13,8 @@
     "rooms": "node --experimental-strip-types --disable-warning=ExperimentalWarning src/rooms-cli.ts",
     "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning --test test/*.test.ts",
     "db:migrate": "node --experimental-strip-types --disable-warning=ExperimentalWarning src/db/migrate-cli.ts",
-    "db:seed": "node --experimental-strip-types --disable-warning=ExperimentalWarning src/db/seed-cli.ts"
+    "db:seed": "node --experimental-strip-types --disable-warning=ExperimentalWarning src/db/seed-cli.ts",
+    "key": "node scripts/create-registration-key.mjs"
   },
   "dependencies": {
     "ws": "^8.22.1"

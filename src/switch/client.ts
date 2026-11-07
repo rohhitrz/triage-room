@@ -21,6 +21,18 @@ export type SwitchClientOptions = {
 
 type Socket = WebSocket;
 
+/**
+ * switch-core 0.31 sends control frames as {"event": "...", "data": {...}}, with
+ * fields such as `generation`, `code`, `from_sequence` and `resumed_at` inside
+ * `data`. Lift them to the top level, where they are read, without overwriting
+ * anything already there. Domain messages keep `data.payload` as it is.
+ */
+export function liftControlFields(frame: Record<string, unknown>): Record<string, unknown> {
+  const data = frame.data;
+  if (frame.event === "message" || !data || typeof data !== "object" || Array.isArray(data)) return frame;
+  return { ...(data as Record<string, unknown>), ...frame };
+}
+
 export class SwitchClient {
   generation: string | number | null = null;
   openedUrls: string[] = [];
@@ -67,23 +79,40 @@ export class SwitchClient {
     if (this.discovery && !schemaMentionsThread(this.discovery.post_message_schema)) {
       throw new Error("post_message schema has no thread_id. Refusing to post at the channel root.");
     }
+    await this.ensureRoom();
+    // post_message has no room argument: it posts to the room this session is
+    // connected to, which ensureRoom just set. The text field is `body`.
+    const response = await this.callOp("post_message", { body: content, thread_id: threadId });
+    if (!response.ok) throw new Error(`post_message failed: ${response.status} ${await response.text()}`);
+  }
+
+  private roomBoundGeneration: string | number | null | undefined = undefined;
+
+  /** Connect this session to the room once per socket generation. */
+  private async ensureRoom(): Promise<void> {
+    if (this.roomBoundGeneration === this.generation) return;
+    const response = await this.callOp("connect_to_room", {
+      room_id: this.options.roomId,
+      include_general_instructions: false,
+    });
+    if (!response.ok) throw new Error(`connect_to_room failed: ${response.status} ${await response.text()}`);
+    await response.text();
+    this.roomBoundGeneration = this.generation;
+  }
+
+  private callOp(operation: string, args: Record<string, unknown>): Promise<Response> {
     const fetchImpl = this.options.fetchImpl ?? fetch;
     const base = this.options.baseUrl.replace(/\/$/, "");
-    const response = await fetchImpl(`${base}/agents/${this.options.agentId}/ops/post_message`, {
+    return fetchImpl(`${base}/agents/${this.options.agentId}/ops/${operation}`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${this.options.apiKey}`,
         "Content-Type": "application/json",
         "X-Switch-Connection-Id": this.options.connectionId,
       },
-      body: JSON.stringify({
-        room_id: this.options.roomId,
-        content,
-        thread_id: threadId,
-      }),
+      body: JSON.stringify(args),
       signal: AbortSignal.timeout(20_000),
     });
-    if (!response.ok) throw new Error(`post_message failed: ${response.status} ${await response.text()}`);
   }
 
   private socketUrl(): string {
@@ -121,7 +150,7 @@ export class SwitchClient {
         try {
           const parsed = JSON.parse(raw.toString()) as unknown;
           if (!parsed || typeof parsed !== "object") throw new Error("frame is not an object");
-          frame = parsed as Record<string, unknown>;
+          frame = liftControlFields(parsed as Record<string, unknown>);
         } catch (error) {
           console.error(`ignored malformed Switch frame: ${error instanceof Error ? error.message : error}`);
           return;

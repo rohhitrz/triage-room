@@ -86,7 +86,8 @@ test("posts in thread and refuses a missing thread id", async () => {
     await client.post("Unsent draft", "thr_9");
     assert.equal(fake.posts.length, 1);
     assert.equal(fake.posts[0].body.thread_id, "thr_9");
-    assert.equal(fake.posts[0].body.room_id, "room_1");
+    assert.equal(fake.posts[0].body.body, "Unsent draft");
+    assert.equal(fake.posts[0].body.room_id, "room_1", "posted into the room connect_to_room selected");
     assert.match(fake.posts[0].path, /\/ops\/post_message$/);
     assert.equal(fake.posts[0].connectionId, "conn-1");
   } finally {
@@ -195,6 +196,19 @@ test("registration saves the agent key before addressing can fail", async () => 
     assert.equal(saved.length, 1);
     assert.equal(saved[0]?.id, "agt_test");
     assert.ok(saved[0]?.api_key);
+  } finally {
+    await fake.stop();
+  }
+});
+
+test("a server that refuses agent-set addressing keeps its owner-only default", async () => {
+  const fake = new FakeSwitch();
+  fake.refuseAddressing = true;
+  await fake.start();
+  try {
+    const created = await registerAgent({ baseUrl: fake.baseUrl(), registrationKey: fake.registrationKey });
+    assert.equal(created.id, "agt_test");
+    assert.equal(created.addressing, "server_default");
   } finally {
     await fake.stop();
   }

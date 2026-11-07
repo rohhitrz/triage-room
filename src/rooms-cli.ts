@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { loadEnv } from "./env.ts";
 import { listRooms } from "./switch/rooms.ts";
@@ -15,5 +16,7 @@ if (!baseUrl || !agentId || !agentKey) {
   console.error("Need SWITCH_BASE_URL and a registered agent. Run npm run register first.");
   process.exit(1);
 }
-const rooms = await listRooms({ baseUrl, agentId, apiKey: agentKey });
+// A throwaway connection id: reusing the agent's own would take over the
+// socket a running `npm start` holds.
+const rooms = await listRooms({ baseUrl, agentId, apiKey: agentKey, connectionId: randomUUID() });
 console.log(JSON.stringify(rooms, null, 2));

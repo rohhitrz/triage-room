@@ -28,4 +28,8 @@ const created = await registerAgent({
 });
 console.log(`registered ${created.id}`);
 console.log("saved data/agent.json (gitignored)");
-console.log("addressing set to owner_only");
+console.log(
+  created.addressing === "owner_only"
+    ? "addressing set to owner_only"
+    : "addressing left at the server default (a new agent answers its owner only). Check it on the agent's page in Console.",
+);

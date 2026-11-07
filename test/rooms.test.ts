@@ -47,6 +47,7 @@ test("list_rooms returns the room id the README tells Rohit to copy", async () =
       baseUrl: fake.baseUrl(),
       agentId: "agt_test",
       apiKey: "agent_test_key",
+      connectionId: "rooms-probe",
     })) as { result: Array<{ id: string }> };
     assert.equal(body.result[0].id, "room_1");
   } finally {

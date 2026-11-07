@@ -22,7 +22,7 @@ export async function registerAgent(input: {
   name?: string;
   fetchImpl?: typeof fetch;
   persist?: (created: { id: string; api_key: string }) => void;
-}): Promise<{ id: string; api_key: string }> {
+}): Promise<{ id: string; api_key: string; addressing: "owner_only" | "server_default" }> {
   assertRegistrationKey(input);
   const fetchImpl = input.fetchImpl ?? fetch;
   const name = input.name ?? "refund-desk";
@@ -61,8 +61,15 @@ export async function registerAgent(input: {
     signal: AbortSignal.timeout(20_000),
     body: JSON.stringify({ agent_id: created.id, addressing: "owner_only" }),
   });
+  // Newer servers refuse this from the agent's own key: only the owner may change
+  // addressing, in Console. A new agent already answers its owner only, so that
+  // refusal leaves the setting we want in place.
+  if (addressing.status === 403) {
+    await addressing.text();
+    return { ...created, addressing: "server_default" };
+  }
   if (!addressing.ok) {
     throw new Error(`update_agent_detail failed: ${addressing.status} ${await addressing.text()}`);
   }
-  return created;
+  return { ...created, addressing: "owner_only" };
 }

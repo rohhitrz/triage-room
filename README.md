@@ -35,7 +35,9 @@ curl -sS "$SWITCH_BASE_URL/health"
 
 You want HTTP 200 from the bridge, not the Mattermost page. A 401 means the host is right and the path is wrong.
 
-6. In the Gateway (same origin, API Keys), create a key of type **registration**. Put it in `SWITCH_REGISTRATION_KEY`. Do not use the deployment bootstrap key. That key's agents belong to a dedicated account, so owner-only approval would not bind to you. If the Gateway has no API Keys page, ask in the WeMakeDevs Discord before filming. Do not invent another registration path.
+6. Create a key of type **registration** and put it in `SWITCH_REGISTRATION_KEY`. Do not use the deployment bootstrap key. That key's agents belong to a dedicated account, so owner-only approval would not bind to you.
+   - If your Console has an API Keys page (Gateway, same origin), create it there.
+   - **Console 0.40.1 with a native local server has no API Keys page and no Gateway UI.** Use `npm run key` instead (after step 2 below). It asks for a Switch account, signs in to `/gateway/auth/login`, calls `POST /gateway/api-keys`, and writes the key into `.env` without printing it. The password is read without echo. On a Console-run server, the admin login is the `GATEWAY_ADMIN_EMAIL` and `GATEWAY_ADMIN_PASSWORD` lines in `~/Library/Application Support/switchdash/local-switch-server/native/run/switch-core.env`. Read them yourself; the script never opens that file.
 
 ### 2. Install this repo
 
@@ -71,15 +73,16 @@ npm run register
 
 ### 3. Create the room
 
-1. In Console, create a room on the bundled Mattermost bridge. Name it `refund-desk`. Add the agent `refund-desk`. Do not add a second agent.
+1. In Console, create a room on the bundled Mattermost bridge. Name it `refund-desk`. Do not add a second agent.
 2. Paste [room/instructions.md](room/instructions.md) into the room instructions.
 3. Invite yourself if the channel does not already contain you.
+4. Add the agent. Console's agent picker lists only agents Console runs, so `refund-desk` will not appear there. In the Mattermost channel, send `/invite @refund-desk`. Switch posts a greeting from the bot when the room assignment lands.
 
 ```bash
 npm run rooms
 ```
 
-Copy the room id into `.env` as `SWITCH_ROOM_ID`. If `list_rooms` fails, copy the id from the room page in the Gateway and continue.
+Copy the `room_id` of the room named `refund-desk` into `.env` as `SWITCH_ROOM_ID`. The command opens its own short-lived connection, so it is safe to run while `npm start` is up.
 
 ```bash
 npm run discover

@@ -91,8 +91,14 @@ export function buildDraftPrompt(input: {
     .join("\n\n");
   return {
     system:
+      "You are a support agent at Northwind Goods writing to a customer about their order. " +
       "Return one JSON object with customer_reply, internal_note, and cited_chunk_ids. " +
-      "Write the customer reply only. Do not decide eligibility. Do not claim that a reply was sent, finance was flagged, or a refund was recorded.",
+      "customer_reply is the message the support team will send TO the customer: address the customer by name, " +
+      "write as the company (we/our), never as the customer, and keep it to 2-4 short sentences. " +
+      "Follow the code eligibility exactly: if eligible, say we are reviewing the duplicate charge for a refund; " +
+      "if ineligible, explain the reason politely from the policy and offer further help. " +
+      "Do not decide eligibility yourself. Do not claim that a reply was sent, finance was flagged, or a refund was recorded or issued. " +
+      "internal_note is one line for the support team. cited_chunk_ids lists the policy clause ids you relied on.",
     user: [
       `Ticket: ${input.ticketText}`,
       `Order: ${JSON.stringify(input.order)}`,
