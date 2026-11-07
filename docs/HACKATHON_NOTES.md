@@ -1,24 +1,24 @@
-# Flip the Switch — research notes
+# Flip the Switch — my research notes
 
-Researched 6 Nov 2026, about 16:00 IST. Primary event page is WeMakeDevs. DevTools Academy is a co-host and disagrees on some prize counts; both are cited. Switch behavior below is from the current docs at docs.switchagents.ai, which say to prefer the docs over the GitHub tree for released behavior.
+I collected these on 6 Nov 2026, about 16:00 IST, before building. Primary event page is WeMakeDevs. DevTools Academy is a co-host and disagrees on some prize counts; both are cited. Switch behavior below is from the current docs at docs.switchagents.ai, which say to prefer the docs over the GitHub tree for released behavior.
 
 ## Eligibility verdict
 
-**Eligible to enter, with two conditions Rohit must confirm himself.** Nothing in the published rules makes a solo participant in India ineligible.
+**A solo entrant from India is eligible.** Nothing in the published rules excludes it. Age and affiliation are personal conditions every entrant confirms for themselves.
 
 | Check | Result | Source |
 | --- | --- | --- |
 | Geography | India is not on the comprehensive-sanctions list (Cuba, Iran, North Korea, Syria, and the Crimea, Donetsk, Luhansk, Zaporizhzhia, and Kherson regions of Ukraine). | [Rules §1–2](https://www.wemakedevs.org/hackathons/switch/rules) |
-| Age | Must be at least 18, or the age of majority where he lives, whichever is greater. In India that floor is 18. Not verified from the repo. | [Rules §1](https://www.wemakedevs.org/hackathons/switch/rules), [DevTools Academy FAQ](https://www.devtoolsacademy.com/hackathons/flip-the-switch) |
+| Age | Must be at least 18, or the age of majority where you live, whichever is greater. In India that floor is 18. | [Rules §1](https://www.wemakedevs.org/hackathons/switch/rules), [DevTools Academy FAQ](https://www.devtoolsacademy.com/hackathons/flip-the-switch) |
 | Team size | Solo, or a team of up to 4. Solo is explicitly allowed. | [Event page](https://www.wemakedevs.org/hackathons/switch) |
-| Affiliation | Employees, officers, directors, and contractors of the Sponsor (Switch AI) and its parent, affiliates, judges, and their immediate family or household cannot win. Rohit must not be in that set. | [Rules §4](https://www.wemakedevs.org/hackathons/switch/rules) |
+| Affiliation | Employees, officers, directors, and contractors of the Sponsor (Switch AI) and its parent, affiliates, judges, and their immediate family or household cannot win. | [Rules §4](https://www.wemakedevs.org/hackathons/switch/rules) |
 | Identity | One natural person, legal name, real email. No bots, extra accounts, or automated registration. Using AI to build the submission is allowed. | [Rules §3](https://www.wemakedevs.org/hackathons/switch/rules) |
-| Cost | Free to enter. Switch is free to self-host. He brings his own model key. | [Event FAQ](https://www.wemakedevs.org/hackathons/switch) |
+| Cost | Free to enter. Switch is free to self-host. I bring my own model key. | [Event FAQ](https://www.wemakedevs.org/hackathons/switch) |
 | Prior work | Existing agents and libraries are allowed. The Switch setup and the workflow the agents run must be built during the hackathon (4 Nov 2026, 12:01 AM IST through 7 Nov 2026, 11:59 PM IST). | [DevTools Academy FAQ](https://www.devtoolsacademy.com/hackathons/flip-the-switch) |
 
 Prize payout can require tax forms (the rules name IRS W-9 or W-8BEN) and identity verification. Winners are responsible for their own taxes. ([Rules §3 and §7](https://www.wemakedevs.org/hackathons/switch/rules).)
 
-He keeps ownership of the submission and grants the Sponsor a non-exclusive license to host and promote it. ([Rules §5](https://www.wemakedevs.org/hackathons/switch/rules).)
+I keep ownership of the submission and grants the Sponsor a non-exclusive license to host and promote it. ([Rules §5](https://www.wemakedevs.org/hackathons/switch/rules).)
 
 ## Event facts
 
@@ -84,10 +84,10 @@ What that implies for a 24-hour solo build:
 Agreed by [DevTools Academy, "What you submit"](https://www.devtoolsacademy.com/hackathons/flip-the-switch) and the [WeMakeDevs schedule](https://www.wemakedevs.org/hackathons/switch/schedule) ("Submit your repo, demo video and README"):
 
 1. A **public** project repository.
-2. A **short demo video** of the workflow running. No published length, resolution, or host. The attached brief's 90–120 seconds is a presentation choice, not a rule. Keep it under two minutes.
+2. A **short demo video** of the workflow running. The organisers' final email asks for it to be under three minutes. Mine is about two.
 3. A **README** that says which agents were connected, how the channel is set up, and how to run it.
 
-Optional, and only if he actually does them:
+Optional, and only if actually done:
 
 - A blog post, which also enters Best Blog.
 - A Wispr Flow Insights screenshot, which enters Code with Wispr. The scorecard has to be real usage, not a plan to dictate later.
@@ -117,15 +117,15 @@ New rooms are public-read and public-write. That is acceptable for a local demo.
 
 The marketing YAML on the event page (`agents`, `room`, `kickoff`, `{team}` fields) is a teaching example. The template language Console actually imports is version 1 or version 2 in the Switch repo; Switch 0.31 reads both. Version 2 uses `version: 2` and a `resources:` list. A template that **creates** an agent needs `provider`, `machine` (or `location`), and `directory`, and Console runs that agent. `allow_existing: true` is how a template uses an agent that already exists. ([Templates](https://docs.switchagents.ai/switch-rooms/administer/room-templates.md), [changelog notes on #851](https://github.com/sandbox-quantum/switch/blob/main/CHANGELOG.md).)
 
-### Agent protocol (this is the integration we will build)
+### Agent protocol (the integration I built)
 
 Sources: [protocol](https://docs.switchagents.ai/switch-rooms/internals/agent-protocol.md), [connection](https://docs.switchagents.ai/switch-rooms/internals/agent-connection.md), [events](https://docs.switchagents.ai/switch-rooms/internals/agent-events.md).
 
-The attached brief says "SSE in, HTTP out." That is the old client. **SSE is deprecated.** Current clients open a WebSocket and call HTTP for everything they do. There is no client library.
+The event page still says "Server-sent events in, HTTP out." That is the old client. **SSE is deprecated.** Current clients open a WebSocket and call HTTP for everything they do. There is no client library.
 
 Registration, once:
 
-- `POST /agents` with a **registration** API key (`Authorization: Bearer`). An agent API key cannot register. The key is created on the Gateway API Keys page; its creator becomes the agent owner. A brand-new deployment can use its bootstrap key instead. Refund Desk does not: that key's agents belong to a dedicated account, so owner-only approval would not bind Rohit. He creates a registration key on the Gateway after Console signs him in.
+- `POST /agents` with a **registration** API key (`Authorization: Bearer`). An agent API key cannot register. The key is created on the Gateway API Keys page; its creator becomes the agent owner. A brand-new deployment can use its bootstrap key instead. Refund Desk does not: that key's agents belong to a dedicated account, so owner-only approval would not bind to me. I create a registration key instead (Console 0.40.1 has no API Keys page, so `npm run key` does it through the gateway API).
 - Do **not** call `POST /agents/register-known`. That route only registers the agent types Console runs.
 - Body requires `name` (`^[a-z0-9][a-z0-9._-]*$`), `description`, `connector_type` (free-form), and `integration_profile`.
 - `integration_profile` requires `connection_model` (`always_on`, `session_addressable`, `auto_session`, or `session_passive`), `message_exchange` (boolean), and `pre_invocation_mediation`, `post_invocation_mediation`, `event_reporting` (send `[]` if unused).
@@ -138,8 +138,8 @@ Connection:
 
 - `GET /agents/{agent_id}/connection/ws?connection_id=<uuid>&rooms=<id>` with the agent API key. Reuse the same `connection_id`. Scheme matches the server (`ws://` locally).
 - Browser WebSockets cannot set the Authorization header. The client has to be a server process.
-- If the agent is run by an agent controller, the socket is refused `managed_by_controller` (close 4409). Console's New Agent form creates that kind of agent. A protocol client we run ourselves must be registered with `POST /agents` and not also created as a Console-managed agent of the same name.
-- On a Console-run local server, agent management is on by default and Console moves **agents it runs** onto a managed machine. That move is about Console-run agents, not a socket we hold ourselves. Still, the first build hour has to prove our socket stays up. ([What keeps your agent running](https://docs.switchagents.ai/switch-rooms/getting-started/what-keeps-your-agent-running.md).)
+- If the agent is run by an agent controller, the socket is refused `managed_by_controller` (close 4409). Console's New Agent form creates that kind of agent. A protocol client you run yourself must be registered with `POST /agents` and not also created as a Console-managed agent of the same name.
+- On a Console-run local server, agent management is on by default and Console moves **agents it runs** onto a managed machine. That move is about Console-run agents, not a socket you hold yourself. I still checked early that my socket stays up. ([What keeps your agent running](https://docs.switchagents.ai/switch-rooms/getting-started/what-keeps-your-agent-running.md).)
 - First frame is `connection_state`. Keep `generation`, `rooms`, and `cursor` from that frame.
 - Server sends `ping` every 2 seconds. Reply immediately with `{"type":"pong","cursor":<highest sequence processed>}`. Silence for 6 seconds lapses the claim (`heartbeat_lapsed`), which is recoverable.
 - `taken_over` is final: do not reconnect. Pass `expected_generation` on resume so two retries do not steal the socket from each other.
@@ -158,7 +158,7 @@ From the [shared responsibility model](https://docs.switchagents.ai/switch-rooms
 
 > Switch doesn't look at what a tool call would do, and a room doesn't turn a tool call into a reviewed action. Put the control where the agent runs.
 
-An in-thread "Approved" is a message. It becomes a control only if our process refuses the tool without a recorded approval. Prompt text that says "wait for a human" is not that control. Switch Trust can redact PII before a message reaches a room ([guardrails scenario](https://docs.switchagents.ai/switch-rooms/use-cases/guardrails.md)); that is a separate product, not part of a local Console install, and not something this build should depend on.
+An in-thread "Approved" is a message. It becomes a control only if my process refuses the tool without a recorded approval. Prompt text that says "wait for a human" is not that control. Switch Trust can redact PII before a message reaches a room ([guardrails scenario](https://docs.switchagents.ai/switch-rooms/use-cases/guardrails.md)); that is a separate product, not part of a local Console install, and not something this build should depend on.
 
 ### Docs map used for this pass
 
@@ -172,14 +172,14 @@ An in-thread "Approved" is a message. It becomes a control only if our process r
 - Protocol, connection, events: linked above
 - Repo (do not treat `docs/official/` inside it as source of truth): https://github.com/sandbox-quantum/switch
 
-## Corrections to the attached brief
+## Early assumptions I changed
 
-The uploads (`README`, `SUBMISSION`, `agent-instructions`, `triage-room.template.yaml`, `DEMO`, `CHECKLIST`) were a hypothesis, not the rules.
+My first plan was a guess. These are the parts the sources corrected.
 
-| Attached claim | What the sources say |
+| What I assumed at first | What the sources say |
 | --- | --- |
 | Transport is SSE in, HTTP out | SSE is deprecated. Use the WebSocket. |
-| Point the room at the existing `dukaan-agent` repo | Allowed as prior art, but a bad bet. Judges must clone and run the workflow, and the workflow itself has to be built during the hackathon. This repo will contain the agent. |
-| The room template in the upload is what Console imports | It matches the marketing sample, not the versioned template language. Phase 2 writes the template from a captured room or an Official template. |
-| Track 01 is won by a support-triage chat | The event page's own sample is a triage pair. A label-and-route room spends the creativity criterion. |
+| Point the room at my existing `dukaan-agent` repo | Allowed as prior art, but a bad bet. Judges must clone and run the workflow, and the workflow itself has to be built during the hackathon. This repo contains the agent. |
+| A marketing-style room template is what Console imports | It matches the marketing sample, not the versioned template language. |
+| A support-triage chat is the obvious Track 01 entry | The event page's own sample is a triage pair. A label-and-route room spends the creativity criterion, so I built an approval workflow instead. |
 | A public live link is part of looking finished | Not required. A local audit view is still worth building, because the chat transcript alone cannot prove a tool was refused. |

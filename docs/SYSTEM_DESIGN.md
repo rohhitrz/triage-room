@@ -4,12 +4,12 @@
 
 | Piece | Where it runs | Role |
 | --- | --- | --- |
-| Switch server and Mattermost | Docker, via Switch Console, on Rohit's machine | Room, identity, bridge. Not vendored here. |
+| Switch server and Mattermost | Docker, via Switch Console, on your machine | Room, identity, bridge. Not vendored here. |
 | `refund-desk` | Node 22, this repo | Protocol client, inbox, eligibility, one model call, gate, ledger, HTML page. |
 | SQLite | `data/refund-desk.sqlite` | Gitignored. Agent is the only writer. |
 | Model | OpenAI-compatible HTTPS | Wording only. OpenAI or Gemini, key from the environment. |
 
-Console does not run this agent. Registration uses Rohit's registration key so he is the owner. The bootstrap key is refused: agents it creates belong to a dedicated account, and owner-only approval would then bind the wrong person.
+Console does not run this agent. Registration uses the owner's own registration key, so the person who creates the key owns the agent. The bootstrap key is refused: agents it creates belong to a dedicated account, and owner-only approval would then bind the wrong person.
 
 ## Flow
 
@@ -49,7 +49,7 @@ sequenceDiagram
 7. Reconnect with the same `connection_id`, `start_from` set to `resume_sequence`, and `expected_generation`. Stop on `taken_over`.
 8. Post with `post_message` and a non-null `thread_id`. If the live input schema has no thread field, exit and print the schema. There is no `POST /agents/{id}/message` fallback and no channel-root post.
 
-`docs/switch-ops.expected.json` is the shape this client sends. A real Console may differ. Discovery is what Rohit records during the smoke test. This VM cannot see his Console version.
+`docs/switch-ops.expected.json` is the shape this client sends. A real Console may differ, so `npm run discover` records the live schema during the smoke test. Against Console 0.40.1 it differed in two places (`body` instead of `content`, and no room id), and the client now matches the live server.
 
 Room instructions live in `room/instructions.md`. Paste them before the first ticket. Reconnect the agent after pasting so it picks them up.
 
@@ -57,7 +57,7 @@ Room instructions live in `room/instructions.md`. Paste them before the first ti
 
 Domain events carry a numeric `id`. Control frames do not.
 
-- A numbered event is inserted into `inbox` as `queued` in the same transaction that advances `checkpoint.queued_sequence` (what we actually received) and `resume_sequence` (what the socket reports). The pong uses `resume_sequence` only after that commit.
+- A numbered event is inserted into `inbox` as `queued` in the same transaction that advances `checkpoint.queued_sequence` (what was actually received) and `resume_sequence` (what the socket reports). The pong uses `resume_sequence` only after that commit.
 - Existence of a row is not completion. A duplicate message id is ignored only when `state=completed`. The same sequence number in a later cursor epoch is a different event.
 - On startup, rows left in `processing` return to `queued` only when they still have delivery attempts left. A failed send is requeued until five attempts, then the inbox row and its outbox entry stay failed across restarts.
 - A `gap` does not change `queued_sequence`. Per the [connection docs](https://docs.switchagents.ai/switch-rooms/internals/agent-connection.md), `resume_sequence` becomes `resumed_at`, and the cursor epoch increments so a numbering reset cannot collide with an old sequence. The gap holds a recovery barrier before `read_context` returns: the worker does not claim new work, and an in-flight draft or approval does not commit until reconciliation finishes. `read_context` is parsed. If the current proposal's source is missing from that history, the proposal version increments, older approvals are invalidated, and execution waits for a new proposal. For the first version that source is the opening message. After a resend it is that resend's message, not the original one. The gap does not call the model. The owner can repost the same order's ticket text in this thread, for example `Order #4821 charged twice`, and that explicit resend drafts a new proposal version. A resend that names a different order is refused: that order needs a new root message. Any other reply explains that. Nothing is drafted from the missing history, and execution refuses a proposal whose assessed order is not the ticket's order.

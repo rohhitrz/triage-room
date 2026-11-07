@@ -57,7 +57,7 @@ Write `data/switch-discovery.json`:
 }
 ```
 
-`server_version` is taken from the health body when a version field is present (`version`, `server_version`, or `switch_version`). `console_version` is `SWITCH_CONSOLE_VERSION` from the environment, because Console does not report itself on the bridge. Rohit copies both into the smoke notes. This environment cannot fill them in.
+`server_version` is taken from the health body when a version field is present (`version`, `server_version`, or `switch_version`). `console_version` is `SWITCH_CONSOLE_VERSION` from the environment, because Console does not report itself on the bridge. Copy both into your smoke notes; the bridge does not report the Console version.
 
 `docs/switch-ops.expected.json` is the argument object this client sends. The live `post_message.input_schema` must include `thread_id` on `properties` or `required` (including inside `allOf` / `anyOf` / `oneOf`). A description that merely contains the words is not enough. If the field is absent, the process exits. It does not call `POST /agents/{id}/message`.
 

@@ -39,7 +39,7 @@ test("rooms CLI sends the agent key as a bearer token", async () => {
   }
 });
 
-test("list_rooms returns the room id the README tells Rohit to copy", async () => {
+test("list_rooms returns the room id the README says to copy", async () => {
   const fake = new FakeSwitch();
   await fake.start();
   try {

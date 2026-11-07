@@ -2,7 +2,7 @@
 
 ## Decision
 
-Keep Refund Desk for Track 01. The design review changes how approval, drafting, and the build are done. It does not change the product.
+I'm entering Refund Desk in Track 01, Best Business Workflow.
 
 A human and one agent finish a duplicate-charge ticket in a Switch room. The model writes the customer wording. Code decides eligibility from the order and all three policy clauses. Nothing is sent, flagged, or recorded as a refund until a fail-closed approval in that thread binds the owner, the proposal version, and the exact actions. The filmed demo uses a real model. A local HTML page shows the ledger, including a blocked attempt.
 
@@ -14,7 +14,7 @@ A refund is easy to promise and hard to undo. Switch will carry the conversation
 
 | User | Who they are here | What they need |
 | --- | --- | --- |
-| Support teammate | Rohit, in Mattermost | A short unsent draft, a clear pending list, and a way to approve exact actions. |
+| Support teammate | Me, the room owner, in Mattermost | A short unsent draft, a clear pending list, and a way to approve exact actions. |
 | Agent | `refund-desk` | The order, all three clauses, one model draft, and a gate it cannot talk its way around. |
 | Judge | Clones the repo, watches the video | A real model in the video, tests that pass without Switch, and a README that reaches a room on their own Console. |
 
@@ -35,14 +35,14 @@ One human, one agent.
 
 - Real email, real finance, real card refunds.
 - Full-text search, pgvector, Langfuse, a second process, Next.js.
-- Bootstrap-key registration. That key's owner is a dedicated account, not Rohit, so owner-only approval would not bind to him.
+- Bootstrap-key registration. That key's owner is a dedicated account, not me, so owner-only approval would not bind to my account.
 - Channel-root posts, Mattermost buttons, Slack, Switch Trust.
 - Scripted wording in the demo video. Scripted mode is for tests and CI.
 - A browser token. The page is loopback-only.
 
 ## Demo story
 
-Order `#4821` is a duplicate charge inside the 30-day window. Code proposes `send_reply`, `flag_finance`, and `issue_refund`. Absence of a proposal is not how we show a refusal. The film shows a real blocked request, then the actions that were authorized.
+Order `#4821` is a duplicate charge inside the 30-day window. Code proposes `send_reply`, `flag_finance`, and `issue_refund`. Absence of a proposal is not how I show a refusal. The film shows a real blocked request, then the actions that were authorized.
 
 1. `@refund-desk Order #4821 charged twice, customer wants a refund.`
 2. Agent posts the unsent draft, the code's eligibility, the clauses it used, and proposal version 1. Nothing is executed.
@@ -66,13 +66,13 @@ Order `#4821` is a duplicate charge inside the 30-day window. Code proposes `sen
 | Block | The negation produces an audit reason and no executed row. |
 | Allow | Send and finance flag execute only after the affirmative approval, and the chat text matches the ledger. |
 | Tests | `npm test` passes with no network. |
-| Machine | Rohit can follow the README and see a real reply in under 30 minutes, assuming Docker is already installed. |
+| Machine | Someone new can follow the README and see a real reply in under 30 minutes, assuming Docker is already installed. |
 
 ## Risks
 
 | Risk | Response |
 | --- | --- |
-| Live `post_message` schema has no thread field | Client refuses to post. He records the discovered schema. We do not fall back to the channel root. |
+| Live `post_message` schema has no thread field | The client refuses to post and records the discovered schema. There is no fallback to the channel root. |
 | Owner participant id is unknown until the first message | Approvals fail closed until `SWITCH_OWNER_PARTICIPANT_ID` is set from that sender id. |
-| Model timeout during filming | He retries the ticket. The agent does not substitute the scripted fixture. |
-| Console early access on Linux | Prefer macOS. The fake server proves the client; his smoke checklist proves the real server. |
+| Model timeout during filming | Post the ticket again. The agent does not substitute the scripted fixture. |
+| Console early access on Linux | Prefer macOS. The fake server proves the client; the README's smoke checklist proves the real server. |

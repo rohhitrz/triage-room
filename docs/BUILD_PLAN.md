@@ -1,8 +1,8 @@
 # Build plan — Refund Desk
 
-Design review accepted. Build on this branch, in this order, one commit per stage. Push after each stage's tests pass.
+How I built Refund Desk: in this order, one commit per stage, pushing only after that stage's tests passed.
 
-The deadline is 7 Nov 2026, 11:59 PM IST. This plan is shorter than the first one: no full-text search, no tracing, no Next.js app. Switch comes first because the room is the product. Rohit's machine work (Docker, Console, keys, filming) sits in the README and is not a commit.
+The deadline was 7 Nov 2026, 11:59 PM IST, so I cut scope early: no full-text search, no tracing, no Next.js app. Switch came first because the room is the product. The machine setup (Docker, Console, keys, filming) lives in the README, not in the code.
 
 ## Stages
 
@@ -50,14 +50,14 @@ Commit: `Serve a loopback ledger page from the agent.`
 
 ### 8. README and demo script
 
-`Run it on your machine` with copy-paste steps and a smoke checklist Rohit can finish in under 30 minutes.
+`Run it on your machine` with copy-paste steps and a smoke checklist you can finish in under 30 minutes.
 
 Commit: `Document how to run Refund Desk on a local Switch Console.`
 
 ## Cut line
 
-If the real socket misbehaves on his machine, fix posting and the owner id before touching the page. Do not add a second agent, another chat app, tracing, or a hosted deploy. Do not film scripted mode.
+If the real socket misbehaved on a live server, posting and the owner id came before any work on the page. I did not add a second agent, another chat app, tracing, or a hosted deploy, and I did not film scripted mode.
 
-## What this plan no longer contains
+## What I cut
 
 Full-text search, Langfuse, a Next.js board, a dashboard token, bootstrap-key registration, and posting at the channel root.
